@@ -304,7 +304,15 @@ Use the **high** bits for shard selection, because the low bits are already cons
 
 Each shard owns its own map, policy, lock and capacity (`capacity / N`). Contention drops roughly N-fold.
 
-*Trade-off to document honestly:* per-shard capacity makes eviction **locally** optimal, not globally. A shard that happens to receive unusually hot keys will evict entries a global LRU would have kept. Measured cost is typically 0.5–2% hit ratio. **Quantify it.** A project that reports its own trade-offs is a mature project.
+*Trade-off to document honestly:* per-shard capacity makes eviction **locally** optimal, not globally. A shard that happens to receive unusually hot keys will evict entries a global LRU would have kept. **Measured** (`ShardingHitRatioExperiment`, Zipf 0.99 over 100,000 keys, 5M requests, identical request stream for every row):
+
+| capacity | 1 shard | 4 | 16 | 64 | 256 |
+|---|---|---|---|---|---|
+| 1,000 entries | 48.92% | −0.04 pts | −0.08 | −0.34 | **−1.15** |
+| 10,000 entries | 72.45% | −0.00 | −0.01 | **−0.03** | −0.15 |
+| 50,000 entries | 90.86% | −0.00 | −0.00 | −0.01 | −0.03 |
+
+The cost is **far smaller than the 0.5–2% first guessed** for realistic sizes, and it tracks *entries per shard*: 64 shards of a 10,000-entry cache (~156 entries each) lose 0.03 points, while 256 shards of a 1,000-entry cache (~4 entries each) lose 1.15. Rule of thumb: keep at least ~100 entries per shard and the cost is noise. A project that reports its own trade-offs — and corrects its own estimates when the measurement disagrees — is a mature project.
 
 #### Fix 2 — Lossy read buffers (the good part)
 

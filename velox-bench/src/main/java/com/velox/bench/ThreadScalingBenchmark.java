@@ -1,5 +1,9 @@
 package com.velox.bench;
 
+import com.github.benmanes.caffeine.cache.Caffeine;
+import com.velox.core.Cache;
+import com.velox.core.CacheBuilder;
+import com.velox.core.ShardedCache;
 import com.velox.core.VeloxCache;
 import com.velox.core.policy.LruPolicy;
 import org.openjdk.jmh.annotations.Benchmark;
@@ -13,16 +17,17 @@ import org.openjdk.jmh.annotations.Param;
 import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.annotations.TearDown;
 import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
 
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Random;
+import java.util.SplittableRandom;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
@@ -30,38 +35,53 @@ import java.util.concurrent.locks.ReentrantLock;
  *
  * <h2>What this measures</h2>
  *
- * A web server's cache is hit by many threads at once, so "constant time" has to
- * hold when sixteen threads are calling {@code get} together, not just when one is.
- * This benchmark runs the cache-aside pattern (look up; on a miss, store) with a
- * Zipf-distributed key stream, and reports <b>total operations per millisecond
- * across all threads</b>. Run it at 1, 2, 4, 8 and 16 threads with JMH's
- * {@code -t} option.
+ * A web server's cache is hit by many threads at once, so "constant time" has to hold
+ * when sixteen threads call {@code get} together, not just when one does. This runs the
+ * cache-aside pattern (look up; on a miss, store) and reports <b>total operations per
+ * millisecond across all threads</b>. Run it at 1, 2, 4, 8 and 16 threads with JMH's
+ * {@code -t}. A cache that scaled perfectly would double its throughput each time the
+ * threads doubled.
  *
- * <p>If a cache scaled perfectly, doubling the threads would double the throughput.
+ * <h2>The workload</h2>
+ *
+ * <ul>
+ *   <li>Keys follow a <b>Zipf(0.99)</b> distribution over 100,000 keys: a few keys receive
+ *       most requests, as in real web traffic.</li>
+ *   <li><b>Every thread draws its own independent stream</b> (one generator per thread,
+ *       O(1) sampling by the alias method). An earlier version had all threads walk one
+ *       shared fixed sample from different offsets; threads that started close together
+ *       then re-requested each other's keys, inflating the hit ratio by an amount that
+ *       varied from run to run, which made rows incomparable.</li>
+ *   <li>{@code capacityPercent} sets the cache size as a share of the key space.
+ *       <b>10</b> gives a hit ratio around 70% (a miss every ~3 requests, so writes are
+ *       frequent). <b>50</b> gives around 90-95%, a read-heavy workload of the kind
+ *       caches are actually deployed for, and the case buffered reads are designed for.</li>
+ * </ul>
  *
  * <h2>The implementations</h2>
  *
  * <ul>
- *   <li>{@code SYNC_LINKED_HASH_MAP} -- the textbook Java LRU: an access-ordered
+ *   <li>{@code SYNC_LINKED_HASH_MAP}: the textbook Java LRU, an access-ordered
  *       {@code LinkedHashMap} behind {@code Collections.synchronizedMap}.</li>
- *   <li>{@code VELOX_GLOBAL_LOCK} -- our own single-threaded engine wrapped in one
- *       lock. The naive way to make our cache thread-safe.</li>
- *   <li>{@code CONCURRENT_HASH_MAP} -- <b>no eviction, no ordering</b>. Not a cache at
- *       all: it grows to hold every key. It is the ceiling, showing what a hash map
- *       can do when it is not also maintaining LRU order.</li>
+ *   <li>{@code VELOX_GLOBAL_LOCK}: our single-threaded engine wrapped in one lock.</li>
+ *   <li>{@code VELOX_SHARDED_EXCLUSIVE}: sharded, but every read still takes the shard's
+ *       exclusive lock. Shows what <i>sharding alone</i> buys.</li>
+ *   <li>{@code VELOX_SHARDED_BUFFERED}: sharded, and hits take only the shared lock and
+ *       defer the recency update through the lossy read buffer. The full design.</li>
+ *   <li>{@code CAFFEINE}: the industry-standard JVM cache, as a yardstick. Mature and
+ *       heavily tuned; and it uses a smarter admission policy (TinyLFU), so it reaches a
+ *       higher hit ratio than the LRU caches here. The honest goal is its neighbourhood.</li>
+ *   <li>{@code CONCURRENT_HASH_MAP}: no eviction, no ordering. Not a cache at all (it grows
+ *       to hold every key): a ceiling showing what a hash map can do when it is not also
+ *       maintaining eviction order.</li>
  * </ul>
- *
- * <h2>Why a read is expensive here</h2>
- *
- * In an LRU cache a {@code get} is not a read: it moves the entry to the front of
- * the recency list, which is a write to shared structure. So every lookup needs the
- * exclusive lock, and all threads queue up single-file through it.
  *
  * <h2>Reading the results honestly</h2>
  *
- * The two LRU implementations are directly comparable (same policy, same capacity,
- * same workload). The {@code ConcurrentHashMap} row has a ~100% hit ratio because
- * it never evicts, so it is a ceiling, not a competitor.
+ * <b>Throughput depends on hit ratio</b>, because every miss triggers a write. The
+ * benchmark therefore prints each thread's hit and request counts ({@code [thread-stats]})
+ * so hit ratios can be reported alongside throughput. The LRU rows are directly comparable;
+ * Caffeine and the {@code ConcurrentHashMap} are not the same policy.
  */
 @State(Scope.Benchmark)
 @BenchmarkMode(Mode.Throughput)
@@ -72,12 +92,24 @@ import java.util.concurrent.locks.ReentrantLock;
 public class ThreadScalingBenchmark {
 
     static final int KEY_SPACE = 100_000;
-    static final int CAPACITY = 10_000;                 // 10% of the key space, so eviction is constant
-    static final int SAMPLE_SIZE = 1 << 20;
-    static final int SAMPLE_MASK = SAMPLE_SIZE - 1;
 
-    @Param({"SYNC_LINKED_HASH_MAP", "VELOX_GLOBAL_LOCK", "CONCURRENT_HASH_MAP"})
+    private static final AtomicLong THREAD_SEEDS = new AtomicLong(1_000);
+
+    @Param({"SYNC_LINKED_HASH_MAP", "VELOX_GLOBAL_LOCK", "VELOX_SHARDED_EXCLUSIVE",
+            "VELOX_SHARDED_BUFFERED", "CAFFEINE", "CONCURRENT_HASH_MAP"})
     public String impl;
+
+    /** The cache size as a percentage of the key space. */
+    @Param({"10", "50"})
+    public int capacityPercent;
+
+    /**
+     * Shards used by the sharded variants. 64 is several times the core count, so two threads
+     * rarely meet on one shard. Lowering it is how to ask "what does the read buffer buy
+     * when the lock really is contended?".
+     */
+    @Param({"64"})
+    public int shards;
 
     /** The cache operations the benchmark needs, so every implementation is driven identically. */
     interface BenchCache {
@@ -88,42 +120,75 @@ public class ThreadScalingBenchmark {
 
     private BenchCache cache;
 
+    /** Kept so the trial can report what the run actually did (hit ratio, dropped reads). */
+    private Cache<Integer, Integer> veloxCache;
+
     /** Pre-boxed keys, so the benchmark measures the cache and not Integer allocation. */
-    private Integer[] keys;
+    private Integer[] boxed;
+    private AliasSampler sampler;
 
     @Setup(Level.Trial)
     public void setup() {
-        cache = create(impl);
-        keys = zipfSample(KEY_SPACE, 0.99, SAMPLE_SIZE, 42);
+        int capacity = KEY_SPACE * capacityPercent / 100;
+        cache = create(impl, capacity, shards);
+        if (cache instanceof VeloxBenchCache velox) {
+            veloxCache = velox.cache;
+        }
+        boxed = new Integer[KEY_SPACE];
+        for (int i = 0; i < KEY_SPACE; i++) {
+            boxed[i] = i;
+        }
+        sampler = AliasSampler.zipf(KEY_SPACE, 0.99);
 
-        // Fill the cache once so measurement starts from a realistic steady state
-        // rather than an empty cache.
-        for (int i = 0; i < SAMPLE_SIZE; i++) {
-            Integer key = keys[i];
+        // Fill the cache before measuring, so it starts from a realistic steady state.
+        var random = new SplittableRandom(42);
+        for (int i = 0; i < 2_000_000; i++) {
+            Integer key = boxed[sampler.sample(random)];
             if (cache.get(key) == null) {
                 cache.put(key, key);
             }
         }
     }
 
-    /** Each benchmark thread walks the shared key stream from its own starting point. */
+    @TearDown(Level.Trial)
+    public void report() {
+        if (veloxCache != null) {
+            var stats = veloxCache.stats();
+            long dropped = veloxCache instanceof ShardedCache<Integer, Integer> sharded ? sharded.droppedReads() : 0;
+            System.out.printf("%n[trial-stats] impl=%s requests=%d hitRate=%.2f%% droppedReads=%d (%.3f%% of hits)%n",
+                    impl, stats.requestCount(), stats.hitRate() * 100, dropped,
+                    100.0 * dropped / Math.max(1, stats.hitCount()));
+        }
+    }
+
+    /** Each benchmark thread has its OWN random stream and its own counters. */
     @State(Scope.Thread)
     public static class Cursor {
-        int position;
+        SplittableRandom random;
+        long hits;
+        long requests;
 
         @Setup(Level.Trial)
         public void setup() {
-            position = new Random(Thread.currentThread().threadId()).nextInt(SAMPLE_SIZE);
+            random = new SplittableRandom(THREAD_SEEDS.incrementAndGet());
+        }
+
+        @TearDown(Level.Trial)
+        public void report() {
+            System.out.printf("%n[thread-stats] hits=%d requests=%d%n", hits, requests);
         }
     }
 
     @Benchmark
     public void cacheAside(Cursor cursor, Blackhole blackhole) {
-        Integer key = keys[cursor.position++ & SAMPLE_MASK];
+        Integer key = boxed[sampler.sample(cursor.random)];
         Integer value = cache.get(key);
+        cursor.requests++;
         if (value == null) {
             value = key;
             cache.put(key, value);
+        } else {
+            cursor.hits++;
         }
         blackhole.consume(value);
     }
@@ -132,21 +197,66 @@ public class ThreadScalingBenchmark {
     //  Implementations
     // ------------------------------------------------------------------
 
-    static BenchCache create(String name) {
+    static BenchCache create(String name, int capacity, int shards) {
         return switch (name) {
-            case "SYNC_LINKED_HASH_MAP" -> synchronizedLinkedHashMap();
-            case "VELOX_GLOBAL_LOCK" -> veloxBehindOneLock();
+            case "SYNC_LINKED_HASH_MAP" -> synchronizedLinkedHashMap(capacity);
+            case "VELOX_GLOBAL_LOCK" -> veloxBehindOneLock(capacity);
+            case "VELOX_SHARDED_EXCLUSIVE" -> velox(capacity, shards, false);
+            case "VELOX_SHARDED_BUFFERED" -> velox(capacity, shards, true);
+            case "CAFFEINE" -> caffeine(capacity);
             case "CONCURRENT_HASH_MAP" -> concurrentHashMap();
             default -> throw new IllegalArgumentException("unknown implementation: " + name);
         };
     }
 
-    private static BenchCache synchronizedLinkedHashMap() {
+    /** A Velox sharded cache, driven through the public API exactly as a user would. */
+    private static final class VeloxBenchCache implements BenchCache {
+        final Cache<Integer, Integer> cache;
+
+        VeloxBenchCache(Cache<Integer, Integer> cache) {
+            this.cache = cache;
+        }
+
+        @Override
+        public Integer get(Integer key) {
+            return cache.getIfPresent(key);
+        }
+
+        @Override
+        public void put(Integer key, Integer value) {
+            cache.put(key, value);
+        }
+    }
+
+    private static BenchCache velox(int capacity, int shards, boolean bufferedReads) {
+        return new VeloxBenchCache(CacheBuilder.<Integer, Integer>newBuilder()
+                .maximumSize(capacity)
+                .concurrencyLevel(shards)
+                .bufferedReads(bufferedReads)
+                .build());
+    }
+
+    private static BenchCache caffeine(int capacity) {
+        var cache = Caffeine.newBuilder().maximumSize(capacity).<Integer, Integer>build();
+        return new BenchCache() {
+            @Override
+            public Integer get(Integer key) {
+                return cache.getIfPresent(key);
+            }
+
+            @Override
+            public void put(Integer key, Integer value) {
+                cache.put(key, value);
+            }
+        };
+    }
+
+    private static BenchCache synchronizedLinkedHashMap(int capacity) {
         Map<Integer, Integer> map = Collections.synchronizedMap(
-                new LinkedHashMap<>(CAPACITY * 2, 0.75f, true) {
+                new LinkedHashMap<>(capacity * 2, 0.75f, true) {
                     @Override
                     protected boolean removeEldestEntry(Map.Entry<Integer, Integer> eldest) {
-                        return size() > CAPACITY;
+                        return size() > capacity;
                     }
                 });
         return new BenchCache() {
@@ -162,8 +272,8 @@ public class ThreadScalingBenchmark {
         };
     }
 
-    private static BenchCache veloxBehindOneLock() {
-        var cache = new VeloxCache<Integer, Integer>(CAPACITY, new LruPolicy<>());
+    private static BenchCache veloxBehindOneLock(int capacity) {
+        var cache = new VeloxCache<Integer, Integer>(capacity, new LruPolicy<>());
         var lock = new ReentrantLock();
         return new BenchCache() {
             @Override
@@ -201,35 +311,5 @@ public class ThreadScalingBenchmark {
                 map.put(key, value);
             }
         };
-    }
-
-    // ------------------------------------------------------------------
-    //  Workload
-    // ------------------------------------------------------------------
-
-    /**
-     * Zipf-distributed keys: rank i is requested with probability proportional to
-     * 1 / (i+1)^theta. Real web traffic looks like this, with a few keys receiving
-     * most requests. Sampled by binary search over the cumulative weights.
-     * (Tier 4 replaces this with Vose's alias method, which samples in O(1).)
-     */
-    static Integer[] zipfSample(int keySpace, double theta, int count, long seed) {
-        Integer[] boxed = new Integer[keySpace];
-        for (int i = 0; i < keySpace; i++) {
-            boxed[i] = i;
-        }
-        double[] cumulative = new double[keySpace];
-        double total = 0;
-        for (int i = 0; i < keySpace; i++) {
-            total += 1.0 / Math.pow(i + 1, theta);
-            cumulative[i] = total;
-        }
-        var random = new Random(seed);
-        Integer[] sample = new Integer[count];
-        for (int i = 0; i < count; i++) {
-            int index = Arrays.binarySearch(cumulative, random.nextDouble() * total);
-            sample[i] = boxed[index >= 0 ? index : -index - 1];
-        }
-        return sample;
     }
 }

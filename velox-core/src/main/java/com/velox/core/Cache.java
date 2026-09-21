@@ -38,7 +38,7 @@ import java.util.function.Function;
  * @param <K> the key type
  * @param <V> the value type
  */
-public interface Cache<K, V> {
+public interface Cache<K, V> extends AutoCloseable {
 
     /**
      * Returns the cached value for {@code key}, or {@code null} if absent.
@@ -164,4 +164,14 @@ public interface Cache<K, V> {
      * @implNote O(1)
      */
     CacheStats stats();
+
+    /**
+     * Releases any background resources, such as the cleanup thread of a cache built with
+     * {@code backgroundCleanUp}. A cache with none has nothing to release, so the default
+     * does nothing; the entries themselves are simply garbage collected with the cache.
+     * Safe to call more than once.
+     */
+    @Override
+    default void close() {
+    }
 }

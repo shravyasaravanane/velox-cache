@@ -15,6 +15,10 @@ import com.velox.core.util.Ticker;
 
 import java.time.Duration;
 import java.util.Objects;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Function;
 import java.util.function.IntFunction;
@@ -123,6 +127,12 @@ public final class ShardedCache<K, V> implements Cache<K, V> {
     private final long maximumWeight;
     private final int maximumEntries;
 
+    private static final System.Logger LOG = System.getLogger(ShardedCache.class.getName());
+    private static final AtomicInteger SWEEPER_IDS = new AtomicInteger();
+
+    /** The background cleanup thread, or {@code null} if none was requested. */
+    private final ScheduledExecutorService sweeper;
+
     /**
      * @param capacity        the TOTAL capacity, split across the shards
      * @param requestedShards desired shard count; rounded up to a power of two, then
@@ -134,11 +144,13 @@ public final class ShardedCache<K, V> implements Cache<K, V> {
      * @param listener        told when values leave any shard; may be {@code null}
      * @param bufferedReads   whether hits use the shared lock and a read buffer
      * @param readBufferSize  slots per shard's read buffer; a power of two
+     * @param cleanUpEveryNanos how often a background thread sweeps expired entries, or a
+     *                        non-positive value for no background thread
      */
     ShardedCache(Capacity<K, V> capacity, int requestedShards,
                  IntFunction<EvictionPolicy<K, V>> policyFactory, Supplier<ExpiryEngine<K, V>> expiryFactory,
                  ExpiryConfig expiryConfig, Ticker ticker, RemovalListener<K, V> listener,
-                 boolean bufferedReads, int readBufferSize) {
+                 boolean bufferedReads, int readBufferSize, long cleanUpEveryNanos) {
         Objects.requireNonNull(capacity, "capacity");
         this.maximumWeight = capacity.maximumWeight();
         this.maximumEntries = capacity.maximumEntries();
@@ -165,6 +177,45 @@ public final class ShardedCache<K, V> implements Cache<K, V> {
             made[i] = new Shard<>(engine, this.bufferedReads ? new LossyReadBuffer<>(readBufferSize) : null);
         }
         this.shards = made;
+
+        if (cleanUpEveryNanos > 0) {
+            // A daemon thread, so an application that forgets to close the cache can still exit.
+            this.sweeper = Executors.newSingleThreadScheduledExecutor(task -> {
+                Thread thread = new Thread(task, "velox-sweeper-" + SWEEPER_IDS.incrementAndGet());
+                thread.setDaemon(true);
+                return thread;
+            });
+            // Fixed DELAY, not fixed rate: if a sweep is slow the next waits, rather than piling up.
+            this.sweeper.scheduleWithFixedDelay(this::sweep, cleanUpEveryNanos, cleanUpEveryNanos, TimeUnit.NANOSECONDS);
+        } else {
+            this.sweeper = null;
+        }
+    }
+
+    /**
+     * One background sweep. A failure must not kill the schedule: a periodic task that
+     * throws is silently cancelled by the executor, after which dead entries would
+     * accumulate again with nothing to show for it.
+     */
+    private void sweep() {
+        try {
+            cleanUp();
+        } catch (RuntimeException e) {
+            LOG.log(System.Logger.Level.WARNING, "background cleanup failed; it will try again", e);
+        }
+    }
+
+    /** Stops the background cleanup thread, if there is one. Safe to call more than once. */
+    @Override
+    public void close() {
+        if (sweeper != null) {
+            sweeper.shutdownNow();
+        }
+    }
+
+    /** @return whether a background cleanup thread is running */
+    public boolean hasBackgroundCleanUp() {
+        return sweeper != null && !sweeper.isShutdown();
     }
 
     /** Never more shards than there are units of capacity to share out, and always a power of two. */

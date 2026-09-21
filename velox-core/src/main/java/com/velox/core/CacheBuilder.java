@@ -51,6 +51,7 @@ public final class CacheBuilder<K, V> {
     private int concurrencyLevel = -1;             // -1 = single-threaded engine
     private boolean bufferedReads = true;
     private int readBufferSize = 64;
+    private long cleanUpEveryNanos = -1;
     private Policy policy = Policy.LRU;
     private long expireAfterWriteNanos = -1;
     private long expireAfterAccessNanos = -1;
@@ -244,6 +245,26 @@ public final class CacheBuilder<K, V> {
     }
 
     /**
+     * Sweeps expired entries from a background thread every {@code interval}.
+     *
+     * <p>Without this, expired entries are removed lazily (when read), on every write, and
+     * on {@link Cache#cleanUp()}: a cache that is neither read nor written keeps its dead
+     * entries in memory. The sweeper removes them on a schedule regardless. Only available
+     * with {@link #concurrencyLevel}, because a background thread needs a thread-safe cache
+     * to touch. Call {@link Cache#close()} to stop it (the thread is a daemon, so forgetting
+     * does not stop the JVM exiting).
+     *
+     * <p>Removal listeners for swept entries run on the sweeper thread.
+     *
+     * @param interval the delay between sweeps; must be positive
+     * @return this builder
+     */
+    public CacheBuilder<K, V> backgroundCleanUp(Duration interval) {
+        this.cleanUpEveryNanos = positiveNanos(interval, "backgroundCleanUp");
+        return this;
+    }
+
+    /**
      * Whether hits in a sharded cache take only the shared lock and defer the recency
      * update through a lock-free buffer (the default), or take the exclusive lock like
      * every other operation. Turning it off exists so a benchmark can measure how much
@@ -313,7 +334,11 @@ public final class CacheBuilder<K, V> {
 
         if (concurrencyLevel >= 1) {
             return new ShardedCache<>(capacity, concurrencyLevel, hint -> policy.create(hint), expiryFactory,
-                    expiry, ticker, removalListener, bufferedReads, readBufferSize);
+                    expiry, ticker, removalListener, bufferedReads, readBufferSize, cleanUpEveryNanos);
+        }
+        if (cleanUpEveryNanos > 0) {
+            throw new IllegalStateException(
+                    "backgroundCleanUp needs a thread-safe cache: also call concurrencyLevel(n)");
         }
         EvictionPolicy<K, V> evictionPolicy = policy.create(capacity.sizingHint());
         return new VeloxCache<>(capacity, evictionPolicy, expiry, ticker, expiryFactory.get(), removalListener);
