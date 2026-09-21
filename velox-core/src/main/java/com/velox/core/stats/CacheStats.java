@@ -32,7 +32,8 @@ package com.velox.core.stats;
  * @param missCount      requests that found nothing
  * @param evictionCount  entries dropped to make room (not manual removals)
  * @param loadCount      times a loader ran to fill a miss
- * @param rejectionCount candidates an admission policy refused to cache
+ * @param rejectionCount candidates that were not cached: refused by an admission
+ *                       policy, or heavier than the whole cache
  * @param expirationCount entries removed because their time-to-live ran out
  */
 public record CacheStats(

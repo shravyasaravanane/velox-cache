@@ -42,7 +42,10 @@ import java.util.Objects;
  */
 public final class CacheBuilder<K, V> {
 
-    private int maximumSize = 1_000;
+    private int maximumSize = -1;                // -1 = not set
+    private long maximumWeight = -1;             // -1 = not set
+    private Weigher<K, V> weigher;
+    private int expectedEntries = -1;
     private Policy policy = Policy.LRU;
     private long expireAfterWriteNanos = -1;
     private long expireAfterAccessNanos = -1;
@@ -75,6 +78,52 @@ public final class CacheBuilder<K, V> {
             throw new IllegalArgumentException("maximumSize must be at least 1, got " + maximumSize);
         }
         this.maximumSize = maximumSize;
+        return this;
+    }
+
+    /**
+     * Bounds the cache by total <b>weight</b> instead of entry count, so that
+     * capacity can mean bytes rather than "number of things". Requires a
+     * {@link #weigher}, and cannot be combined with {@link #maximumSize}.
+     *
+     * @param maximumWeight the budget, in whatever unit the weigher returns; at least 1
+     * @return this builder
+     */
+    public CacheBuilder<K, V> maximumWeight(long maximumWeight) {
+        if (maximumWeight < 1) {
+            throw new IllegalArgumentException("maximumWeight must be at least 1, got " + maximumWeight);
+        }
+        this.maximumWeight = maximumWeight;
+        return this;
+    }
+
+    /**
+     * Says how much of the budget each entry uses. Only meaningful together
+     * with {@link #maximumWeight}.
+     *
+     * @param weigher must return at least 1, and the same answer every time for a given key and value
+     * @return this builder
+     */
+    public CacheBuilder<K, V> weigher(Weigher<K, V> weigher) {
+        this.weigher = Objects.requireNonNull(weigher, "weigher");
+        return this;
+    }
+
+    /**
+     * A rough guess at how many entries a weight-bounded cache will hold, used
+     * to pre-size the hash table and to size policies that depend on capacity
+     * (such as LFU aging). A weight budget does not fix an entry count, so the
+     * cache cannot work this out itself. The cache still works if the guess is
+     * wrong; it just sizes things less well. Ignored for count-bounded caches.
+     *
+     * @param expectedEntries roughly how many entries to expect; at least 1
+     * @return this builder
+     */
+    public CacheBuilder<K, V> expectedEntries(int expectedEntries) {
+        if (expectedEntries < 1) {
+            throw new IllegalArgumentException("expectedEntries must be at least 1, got " + expectedEntries);
+        }
+        this.expectedEntries = expectedEntries;
         return this;
     }
 
@@ -184,14 +233,40 @@ public final class CacheBuilder<K, V> {
      * @return a new cache with the configured settings
      */
     public Cache<K, V> build() {
-        EvictionPolicy<K, V> evictionPolicy = policy.create(maximumSize);
+        Capacity<K, V> capacity = buildCapacity();
+        EvictionPolicy<K, V> evictionPolicy = policy.create(capacity.sizingHint());
         ExpiryConfig expiry = new ExpiryConfig(expireAfterWriteNanos, expireAfterAccessNanos, ttlJitter);
         ExpiryEngine<K, V> engine = switch (expiryEngineType) {
             case INDEXED_HEAP -> new HeapExpiryEngine<>();
             // The wheel counts time from its creation, so it starts at "now".
             case TIMING_WHEEL -> new WheelExpiryEngine<>(wheelTickNanos, wheelSize, ticker.read());
         };
-        return new VeloxCache<>(maximumSize, evictionPolicy, expiry, ticker, engine);
+        return new VeloxCache<>(capacity, evictionPolicy, expiry, ticker, engine);
+    }
+
+    /**
+     * Resolves the size options into one capacity, rejecting contradictory ones
+     * rather than silently picking a winner.
+     */
+    private Capacity<K, V> buildCapacity() {
+        if (maximumWeight >= 0) {
+            if (maximumSize >= 0) {
+                throw new IllegalStateException(
+                        "maximumSize and maximumWeight are mutually exclusive: a cache is bounded by one or the other");
+            }
+            if (weigher == null) {
+                throw new IllegalStateException("maximumWeight requires a weigher to say what each entry weighs");
+            }
+            // A weight budget does not fix an entry count, so take the caller's guess
+            // if given. Otherwise assume entries weigh more than 1, which keeps the
+            // hint from being absurd for a byte budget: cap it at something sensible.
+            int hint = expectedEntries > 0 ? expectedEntries : (int) Math.min(maximumWeight, 65_536);
+            return Capacity.weighted(maximumWeight, weigher, hint);
+        }
+        if (weigher != null) {
+            throw new IllegalStateException("a weigher only makes sense with maximumWeight");
+        }
+        return Capacity.entries(maximumSize >= 0 ? maximumSize : 1_000);
     }
 
     private static long positiveNanos(Duration duration, String name) {

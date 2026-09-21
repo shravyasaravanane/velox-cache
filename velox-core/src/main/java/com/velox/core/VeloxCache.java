@@ -18,8 +18,8 @@ import java.util.SplittableRandom;
 import java.util.function.Function;
 
 /**
- * The cache engine: a bounded map with a pluggable eviction policy and
- * optional time-based expiry.
+ * The cache engine: a bounded map with a pluggable eviction policy, optional
+ * time-based expiry, and capacity measured either in entries or in weight.
  *
  * <h2>Three structures, one set of nodes</h2>
  *
@@ -33,10 +33,27 @@ import java.util.function.Function;
  * </pre>
  *
  * The consequence to keep in mind: an entry lives in up to three places, so
- * <b>every removal must update all three</b>. That is why eviction,
+ * <b>every removal must update all of them</b>. That is why eviction,
  * invalidation and expiry all funnel through one method, {@link #detach}.
  * Removing from two and forgetting the third leaks memory or leaves a phantom
  * entry -- exactly what {@link #assertInvariants()} checks for.
+ *
+ * <h2>Capacity is a weight budget</h2>
+ *
+ * The cache tracks a running {@code weightedSize} and refuses to exceed
+ * {@code maximumWeight}. A count-bounded cache is the special case where every
+ * entry weighs 1, so there is one eviction mechanism, not two. Consequences:
+ *
+ * <ul>
+ *   <li><b>Eviction is a loop.</b> One large newcomer may need several small
+ *       entries evicted to make room.</li>
+ *   <li><b>An entry heavier than the whole cache is refused</b> outright,
+ *       without evicting anything. Flushing every useful entry to make room for
+ *       something that still would not fit would be pure loss.</li>
+ *   <li><b>Overwriting with a lighter or equal value updates in place.</b>
+ *       Overwriting with a <i>heavier</i> value is treated as remove-and-insert
+ *       (see {@link #putInternal}).</li>
+ * </ul>
  *
  * <h2>How expired entries actually get removed</h2>
  *
@@ -47,20 +64,15 @@ import java.util.function.Function;
  *   <li><b>Lazily on read.</b> A read that finds an expired entry removes it
  *       and reports a miss. Expired data is never served.</li>
  *   <li><b>Opportunistically on write.</b> Every {@code put} first drains all
- *       due entries from the expiry engine. This matters for capacity: without
- *       it, a dead entry would sit in the cache while a perfectly live one was
- *       evicted to make room.</li>
+ *       due entries from the expiry engine, so a dead entry is reaped before a
+ *       live one is evicted to make room.</li>
  *   <li><b>On demand</b> via {@link #cleanUp()}.</li>
  * </ol>
- *
- * A cache that is neither read nor written keeps its expired entries in
- * memory until one of those happens. That is the price of having no thread.
  *
  * <h2>The clock is only read when needed</h2>
  *
  * Reading the clock costs real time (tens of nanoseconds), so a cache with no
- * TTLs configured never reads it: reads and writes skip the clock entirely
- * unless expiry is actually in play.
+ * TTLs configured never reads it.
  *
  * <h2>Thread safety</h2>
  *
@@ -86,23 +98,34 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
     private final Ticker ticker;
     private final SplittableRandom jitterRandom = new SplittableRandom(0x717EL);
 
-    /** Hard limit on entries. */
-    private final int maximumSize;
+    /** The capacity budget; for a count-bounded cache this is the entry limit. */
+    private final long maximumWeight;
+
+    /** The entry limit for a count-bounded cache, or -1 when bounded by weight. */
+    private final int maximumEntries;
+
+    /** Assigns each entry its weight; {@code null} means every entry weighs 1. */
+    private final Weigher<K, V> weigher;
+
+    /** The total weight of the entries held. Maintained incrementally; see {@link #detach}. */
+    private long weightedSize;
 
     private final StatsCounter stats = new StatsCounter();
 
     /**
-     * Creates a cache with no configured expiry. Entries still expire if given
-     * a per-entry TTL through {@link #put(Object, Object, Duration)}.
+     * Creates a count-bounded cache with no configured expiry. Entries still
+     * expire if given a per-entry TTL through {@link #put(Object, Object, Duration)}.
      *
      * @param maximumSize the most entries to hold; must be at least 1
      * @param policy      the eviction strategy
      */
     public VeloxCache(int maximumSize, EvictionPolicy<K, V> policy) {
-        this(maximumSize, policy, ExpiryConfig.NONE, Ticker.system(), new HeapExpiryEngine<>());
+        this(Capacity.entries(maximumSize), policy, ExpiryConfig.NONE, Ticker.system(), new HeapExpiryEngine<>());
     }
 
     /**
+     * Creates a count-bounded cache.
+     *
      * @param maximumSize  the most entries to hold; must be at least 1
      * @param policy       the eviction strategy
      * @param expiryConfig how entries expire
@@ -111,17 +134,28 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
      */
     public VeloxCache(int maximumSize, EvictionPolicy<K, V> policy, ExpiryConfig expiryConfig,
                       Ticker ticker, ExpiryEngine<K, V> expiry) {
-        if (maximumSize < 1) {
-            throw new IllegalArgumentException("maximumSize must be at least 1, got " + maximumSize);
-        }
-        this.maximumSize = maximumSize;
+        this(Capacity.entries(maximumSize), policy, expiryConfig, ticker, expiry);
+    }
+
+    /**
+     * @param capacity     how full the cache may get: by entry count or by weight
+     * @param policy       the eviction strategy
+     * @param expiryConfig how entries expire
+     * @param ticker       the time source; tests pass a fake one
+     * @param expiry       the engine that schedules expiry
+     */
+    public VeloxCache(Capacity<K, V> capacity, EvictionPolicy<K, V> policy, ExpiryConfig expiryConfig,
+                      Ticker ticker, ExpiryEngine<K, V> expiry) {
+        Objects.requireNonNull(capacity, "capacity");
+        this.maximumWeight = capacity.maximumWeight();
+        this.maximumEntries = capacity.maximumEntries();
+        this.weigher = capacity.weigher();
         this.policy = Objects.requireNonNull(policy, "policy");
         this.expiryConfig = Objects.requireNonNull(expiryConfig, "expiryConfig");
         this.ticker = Objects.requireNonNull(ticker, "ticker");
         this.expiry = Objects.requireNonNull(expiry, "expiry");
-        // Size the table for the full capacity up front. The cache will run at
-        // its limit essentially forever, so pre-sizing avoids resizing later.
-        this.data = new OpenAddressingMap<>(maximumSize);
+        // Pre-size the table so a cache running at its limit never has to resize.
+        this.data = new OpenAddressingMap<>(capacity.sizingHint());
     }
 
     // ------------------------------------------------------------------
@@ -154,8 +188,6 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
 
             if (expiryConfig.hasAccessTtl()) {
                 // Expire-after-access: this read restarts the idle clock.
-                // This is why access-based TTL is costlier -- every hit repositions
-                // the entry in the expiry structure, O(log n) with the heap.
                 recomputeDeadline(node, now);
             }
         }
@@ -188,10 +220,8 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
         //
         // Note what is missing here. If a thousand threads miss on the same
         // hot key at the same instant, this runs the loader a thousand times
-        // for one database row -- a "cache stampede", and a classic way a
-        // caching layer takes down the system it was meant to protect.
-        // A later step adds single-flight coalescing so only one loader runs
-        // and the rest wait for its result.
+        // for one database row -- a "cache stampede". A later step adds
+        // single-flight coalescing so only one loader runs.
         stats.recordLoad();
         V loaded = loader.apply(key);
         if (loaded != null) {
@@ -237,6 +267,10 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
      */
     private void putInternal(K key, V value, long explicitTtlNanos) {
         Objects.requireNonNull(key, "key");
+
+        // Weigh FIRST, before touching anything. A weigher that throws or returns
+        // nonsense then leaves the cache exactly as it was.
+        int weight = weigh(key, value);
         int hash = Hashing.spread(key);
 
         // Read the clock only if something about this call involves time.
@@ -244,44 +278,99 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
         boolean stamps = explicitTtlNanos >= 0 || expiryConfig.hasWriteTtl() || expiryConfig.hasAccessTtl();
         long now = (sweep || stamps) ? ticker.read() : 0;
 
-        // Drain dead entries FIRST. Otherwise a corpse could occupy a slot
+        // Drain dead entries FIRST. Otherwise a corpse could occupy capacity
         // while a live entry is evicted to make room for the newcomer.
         if (sweep) {
             drainExpired(now);
         }
 
-        // --- Case 1: the key is already cached. Update in place. ---
+        // --- Case 1: the key is already cached. ---
         Node<K, V> existing = data.get(key, hash);
         if (existing != null) {
-            existing.setValue(value);
-            policy.onAccess(existing);           // a write counts as a use
-            applyWriteDeadline(existing, now, explicitTtlNanos);
+            int growth = weight - existing.weight();
+
+            if (growth <= 0) {
+                // Same size or lighter: update in place. No room is needed, and the
+                // entry keeps its position and history in the policy.
+                existing.setValue(value);
+                existing.setWeight(weight);
+                weightedSize += growth;
+                policy.onAccess(existing);           // a write counts as a use
+                applyWriteDeadline(existing, now, explicitTtlNanos);
+                return;
+            }
+
+            // HEAVIER: it needs more room than it has. Making room means asking
+            // the policy for victims, and the policy may well nominate THIS entry
+            // (it could be the LRU tail, the FIFO head, a random pick). Evicting the
+            // very entry we are updating, mid-update, is a tangle we can avoid
+            // entirely by taking it out first and inserting it afresh.
+            //
+            // The price: the entry forfeits its policy history (an LFU count, say).
+            // That only happens on a write that grows the entry, and the old value
+            // is being replaced anyway.
+            data.remove(key, hash);
+            detach(existing, RemovalCause.REPLACED);
+        }
+
+        // --- Case 2: a new entry (or one we just removed). Make room. ---
+
+        if (weight > maximumWeight) {
+            // It could not fit even in an empty cache. Do NOT evict anything for
+            // it: flushing every useful entry to make room for something that still
+            // will not fit would be pure loss. If this replaced an existing key, the
+            // old value was removed above, so a stale value is never served.
+            stats.recordRejection();
             return;
         }
 
-        // --- Case 2: a new key. We may need to make room first. ---
         Node<K, V> candidate = new Node<>(key, value, hash);
+        candidate.setWeight(weight);
 
-        if (data.size() >= maximumSize) {
+        // Eviction is a LOOP: a large newcomer may need several small entries gone.
+        while (weightedSize + weight > maximumWeight) {
             Node<K, V> victim = policy.selectVictim();
-
-            if (victim != null) {
-                // Admission control. LRU always says yes. W-TinyLFU (Tier 3)
-                // compares the two entries' estimated frequencies and may
-                // refuse the newcomer outright -- which is how it survives
-                // scans that take LRU's hit ratio to zero.
-                if (!policy.admit(candidate, victim)) {
-                    stats.recordRejection();
-                    return;              // candidate discarded; cache unchanged
-                }
-                data.remove(victim.key(), victim.hash());
-                detach(victim, RemovalCause.SIZE);
+            if (victim == null) {
+                stats.recordRejection();     // unreachable in practice: nothing left to evict
+                return;
             }
+
+            // Admission control, checked against EVERY victim. LRU always says yes.
+            // W-TinyLFU (Tier 3) may refuse the newcomer, which is how it survives
+            // scans that take LRU's hit ratio to zero.
+            //
+            // A subtlety this loop introduces: if the candidate is refused on the
+            // third victim, the first two are already gone. We accept that: the
+            // alternative (working out the full victim set before evicting any) is
+            // impossible for policies like CLOCK whose victim search mutates state.
+            if (!policy.admit(candidate, victim)) {
+                stats.recordRejection();
+                return;
+            }
+            data.remove(victim.key(), victim.hash());
+            detach(victim, RemovalCause.SIZE);
         }
 
         data.put(candidate);
+        weightedSize += weight;
         policy.onInsert(candidate);
         applyWriteDeadline(candidate, now, explicitTtlNanos);
+    }
+
+    /**
+     * @return this entry's weight, validated
+     * @throws IllegalArgumentException if the weigher returns less than 1
+     */
+    private int weigh(K key, V value) {
+        if (weigher == null) {
+            return 1;                        // count-bounded: every entry weighs 1
+        }
+        int weight = weigher.weigh(key, value);
+        if (weight < 1) {
+            throw new IllegalArgumentException(
+                    "a weigher must return at least 1, but returned " + weight + " for key " + key);
+        }
+        return weight;
     }
 
     @Override
@@ -298,6 +387,7 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
         data.clear();
         policy.clear();
         expiry.clear();
+        weightedSize = 0;
     }
 
     @Override
@@ -313,14 +403,17 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
 
     /**
      * Finishes removing {@code node}, which the caller has ALREADY taken out of
-     * the hash map: tells the policy, cancels its expiry, and records why.
+     * the hash map: gives its weight back, tells the policy, cancels its expiry,
+     * and records why.
      *
-     * <p>Every way an entry can leave -- evicted for space, invalidated, expired
-     * -- ends here, so there is exactly one place that keeps the three
-     * structures in step. Two callers forgetting one of the three updates in
-     * two slightly different ways is precisely how such caches leak.
+     * <p>Every way an entry can leave -- evicted for space, invalidated, expired,
+     * replaced by a heavier value -- ends here, so there is exactly one place that
+     * keeps the structures and the running weight in step. The weight subtracted
+     * is the one <i>recorded on the node when it was stored</i>, never a fresh
+     * call to the weigher, so the total cannot drift.
      */
     private void detach(Node<K, V> node, RemovalCause cause) {
+        weightedSize -= node.weight();
         policy.onRemove(node);
         expiry.cancel(node);              // harmless if it was already polled out
         switch (cause) {
@@ -367,10 +460,6 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
      * Derives the effective deadline as the EARLIER of the write-based hard
      * deadline and (if configured) now + the idle timeout, then makes the
      * expiry engine agree.
-     *
-     * <p>Taking the earlier of the two is what lets both TTL kinds coexist:
-     * reads keep an entry alive by pushing the access deadline out, but can
-     * never push it past the hard limit a write set.
      */
     private void recomputeDeadline(Node<K, V> node, long now) {
         boolean has = node.hasHardDeadline();
@@ -417,7 +506,17 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
 
     @Override
     public int maximumSize() {
-        return maximumSize;
+        return maximumEntries;
+    }
+
+    @Override
+    public long maximumWeight() {
+        return maximumWeight;
+    }
+
+    @Override
+    public long weightedSize() {
+        return weightedSize;
     }
 
     @Override
@@ -445,8 +544,12 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
         if (!Invariants.ENABLED) {
             return;
         }
-        Invariants.check(data.size() <= maximumSize,
-                "cache holds " + data.size() + " entries, over its limit of " + maximumSize);
+        Invariants.check(weightedSize <= maximumWeight,
+                "cache holds weight " + weightedSize + ", over its budget of " + maximumWeight);
+        if (maximumEntries >= 0) {
+            Invariants.check(data.size() <= maximumEntries,
+                    "cache holds " + data.size() + " entries, over its limit of " + maximumEntries);
+        }
         data.assertInvariants();
         // This compares the policy's entry count against the map's, which is
         // what catches the two structures drifting apart.
@@ -454,8 +557,14 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
         expiry.assertInvariants();
 
         // Every entry with a deadline must be scheduled, and nothing else may be.
+        // And the running weight must equal the sum of the entries' recorded
+        // weights: the check that catches a removal path that forgot to give
+        // its weight back.
         int[] withDeadline = {0};
+        long[] totalWeight = {0};
         data.forEach(node -> {
+            Invariants.check(node.weight() >= 1, "entry " + node.key() + " has weight " + node.weight());
+            totalWeight[0] += node.weight();
             Invariants.check(node.hasDeadline() == expiry.isScheduled(node),
                     "entry " + node.key() + " hasDeadline=" + node.hasDeadline()
                             + " but the expiry engine disagrees");
@@ -463,6 +572,9 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
                 withDeadline[0]++;
             }
         });
+        Invariants.check(totalWeight[0] == weightedSize,
+                "the entries weigh " + totalWeight[0] + " in total but the running weight says " + weightedSize
+                        + " -- a removal path forgot to give its weight back");
         Invariants.check(withDeadline[0] == expiry.size(),
                 "the expiry engine tracks " + expiry.size() + " entries but " + withDeadline[0]
                         + " cached entries have deadlines -- an entry was removed without being cancelled");
@@ -470,6 +582,9 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
 
     @Override
     public String toString() {
-        return "VeloxCache[" + policy.name() + ", " + size() + "/" + maximumSize + ", " + stats() + "]";
+        String bound = maximumEntries >= 0
+                ? size() + "/" + maximumEntries + " entries"
+                : weightedSize + "/" + maximumWeight + " weight (" + size() + " entries)";
+        return "VeloxCache[" + policy.name() + ", " + bound + ", " + stats() + "]";
     }
 }

@@ -136,10 +136,28 @@ public interface Cache<K, V> {
     int size();
 
     /**
-     * @return the maximum number of entries this cache will hold
+     * @return the maximum number of entries, if the cache is bounded by entry
+     *         count; or <b>-1</b> if it is bounded by weight, where the number of
+     *         entries is not fixed. See {@link #maximumWeight()}.
      * @implNote O(1)
      */
     int maximumSize();
+
+    /**
+     * @return the capacity budget. For a weight-bounded cache this is the
+     *         maximum total weight; for a count-bounded cache every entry weighs
+     *         1, so it equals the maximum number of entries
+     * @implNote O(1)
+     */
+    long maximumWeight();
+
+    /**
+     * @return the total weight of the entries currently held (equal to
+     *         {@link #size()} for a count-bounded cache). Like {@link #size()}, it
+     *         includes entries that have expired but not yet been swept
+     * @implNote O(1) -- maintained incrementally, never recomputed
+     */
+    long weightedSize();
 
     /**
      * @return an immutable snapshot of the counters at this instant

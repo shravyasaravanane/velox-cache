@@ -51,6 +51,15 @@ public final class Node<K, V> {
     V value;
 
     /**
+     * How much capacity this entry uses, recorded when it was stored.
+     *
+     * <p>Recorded rather than recomputed on removal on purpose: subtracting the
+     * number we <i>added</i> keeps the cache's running total exact even if the
+     * value object has since changed size underneath us.
+     */
+    int weight = 1;
+
+    /**
      * The key's hash code, computed once and stored.
      *
      * <p>Why cache it? Because we use the hash in several places (choosing a
@@ -201,6 +210,16 @@ public final class Node<K, V> {
     /** @return this entry's current value. */
     public V value() {
         return value;
+    }
+
+    /** @return the capacity this entry uses, as recorded when it was stored */
+    public int weight() {
+        return weight;
+    }
+
+    /** @param weight the capacity this entry uses; at least 1 */
+    public void setWeight(int weight) {
+        this.weight = weight;
     }
 
     /** @return LFU use count. Meaningful only while an LFU policy tracks this node. */
