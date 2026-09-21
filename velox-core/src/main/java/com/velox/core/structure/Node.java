@@ -51,6 +51,19 @@ public final class Node<K, V> {
     V value;
 
     /**
+     * Set once this entry has left the cache. Never cleared.
+     *
+     * <p>Exists because of buffered reads. A reader records "I used this entry" in a
+     * lock-free buffer and moves on; the recency list is only updated later, in a
+     * batch, by whichever thread drains the buffer. In the meantime the entry may have
+     * been evicted. Applying a recency update to an entry that is no longer in the
+     * policy's structures would corrupt them (unlinking a node that is not linked), so
+     * the drain checks this flag and ignores dead entries. Only ever read or written
+     * under the shard's write lock.
+     */
+    boolean dead;
+
+    /**
      * How much capacity this entry uses, recorded when it was stored.
      *
      * <p>Recorded rather than recomputed on removal on purpose: subtracting the
@@ -210,6 +223,16 @@ public final class Node<K, V> {
     /** @return this entry's current value. */
     public V value() {
         return value;
+    }
+
+    /** @return whether this entry has left the cache */
+    public boolean isDead() {
+        return dead;
+    }
+
+    /** Marks this entry as having left the cache. */
+    public void markDead() {
+        this.dead = true;
     }
 
     /** @return the capacity this entry uses, as recorded when it was stored */

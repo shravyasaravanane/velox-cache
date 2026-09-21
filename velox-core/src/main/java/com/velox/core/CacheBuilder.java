@@ -11,6 +11,7 @@ import com.velox.core.util.Ticker;
 
 import java.time.Duration;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 /**
  * Fluent builder for {@link Cache} instances.
@@ -47,6 +48,9 @@ public final class CacheBuilder<K, V> {
     private Weigher<K, V> weigher;
     private int expectedEntries = -1;
     private RemovalListener<K, V> removalListener;
+    private int concurrencyLevel = -1;             // -1 = single-threaded engine
+    private boolean bufferedReads = true;
+    private int readBufferSize = 64;
     private Policy policy = Policy.LRU;
     private long expireAfterWriteNanos = -1;
     private long expireAfterAccessNanos = -1;
@@ -219,6 +223,56 @@ public final class CacheBuilder<K, V> {
     }
 
     /**
+     * Makes the cache <b>thread-safe</b> by splitting it into independent shards, each
+     * with its own lock. Without this call {@link #build()} returns the single-threaded
+     * engine, which must not be shared between threads.
+     *
+     * <p>More shards mean less contention, and each shard holds a proportionally smaller
+     * share of the capacity. A good starting point is a few times the number of threads
+     * that will use the cache. See {@link ShardedCache} for the trade-offs.
+     *
+     * @param shards the desired shard count, at least 1; rounded up to a power of two and
+     *               reduced if the capacity is too small to give every shard a share
+     * @return this builder
+     */
+    public CacheBuilder<K, V> concurrencyLevel(int shards) {
+        if (shards < 1) {
+            throw new IllegalArgumentException("concurrencyLevel must be at least 1, got " + shards);
+        }
+        this.concurrencyLevel = shards;
+        return this;
+    }
+
+    /**
+     * Whether hits in a sharded cache take only the shared lock and defer the recency
+     * update through a lock-free buffer (the default), or take the exclusive lock like
+     * every other operation. Turning it off exists so a benchmark can measure how much
+     * the buffering is worth; it has no effect without {@link #concurrencyLevel}.
+     *
+     * @param enabled {@code true} for buffered reads
+     * @return this builder
+     */
+    public CacheBuilder<K, V> bufferedReads(boolean enabled) {
+        this.bufferedReads = enabled;
+        return this;
+    }
+
+    /**
+     * Slots in each shard's read buffer. A larger buffer drops fewer reads under bursts
+     * and drains less often; a smaller one uses less memory.
+     *
+     * @param slots a power of two, at least 2
+     * @return this builder
+     */
+    public CacheBuilder<K, V> readBufferSize(int slots) {
+        if (slots < 2 || Integer.bitCount(slots) != 1) {
+            throw new IllegalArgumentException("readBufferSize must be a power of two >= 2, got " + slots);
+        }
+        this.readBufferSize = slots;
+        return this;
+    }
+
+    /**
      * Registers a listener that is told whenever a value leaves the cache, and why.
      * See {@link RemovalListener} for exactly what is reported, when, and what the
      * listener may do.
@@ -248,14 +302,21 @@ public final class CacheBuilder<K, V> {
      */
     public Cache<K, V> build() {
         Capacity<K, V> capacity = buildCapacity();
-        EvictionPolicy<K, V> evictionPolicy = policy.create(capacity.sizingHint());
         ExpiryConfig expiry = new ExpiryConfig(expireAfterWriteNanos, expireAfterAccessNanos, ttlJitter);
-        ExpiryEngine<K, V> engine = switch (expiryEngineType) {
+
+        // The wheel counts time from its creation, so it starts at "now".
+        final long wheelStart = expiryEngineType == ExpiryEngineType.TIMING_WHEEL ? ticker.read() : 0;
+        Supplier<ExpiryEngine<K, V>> expiryFactory = () -> switch (expiryEngineType) {
             case INDEXED_HEAP -> new HeapExpiryEngine<>();
-            // The wheel counts time from its creation, so it starts at "now".
-            case TIMING_WHEEL -> new WheelExpiryEngine<>(wheelTickNanos, wheelSize, ticker.read());
+            case TIMING_WHEEL -> new WheelExpiryEngine<>(wheelTickNanos, wheelSize, wheelStart);
         };
-        return new VeloxCache<>(capacity, evictionPolicy, expiry, ticker, engine, removalListener);
+
+        if (concurrencyLevel >= 1) {
+            return new ShardedCache<>(capacity, concurrencyLevel, hint -> policy.create(hint), expiryFactory,
+                    expiry, ticker, removalListener, bufferedReads, readBufferSize);
+        }
+        EvictionPolicy<K, V> evictionPolicy = policy.create(capacity.sizingHint());
+        return new VeloxCache<>(capacity, evictionPolicy, expiry, ticker, expiryFactory.get(), removalListener);
     }
 
     /**

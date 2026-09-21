@@ -342,6 +342,40 @@ class VeloxCacheRemovalListenerTest {
     }
 
     @Test
+    @DisplayName("a notification queued while another thread is finishing delivery is not left stranded")
+    void notificationQueuedDuringDeliveryIsNotStranded() throws Exception {
+        // The lost-wakeup window: thread 1 has emptied the queue but not yet released the
+        // delivery flag; thread 2 queues a notification and tries to deliver it, fails
+        // because the flag is still held, and leaves. Unless thread 1 RE-CHECKS the queue
+        // after releasing the flag, that notification waits for some unrelated later
+        // operation. The window is nanoseconds wide, so the test stops thread 1 inside it.
+        var events = new ArrayList<Event>();
+        var cache = cache(1, (k, v, c) -> events.add(new Event(k, v, c)));
+        cache.put("B", 2);                              // the cache (capacity 1) now holds B
+
+        var hookRuns = new java.util.concurrent.atomic.AtomicInteger();
+        cache.beforeDeliveryFlagRelease = () -> {
+            if (hookRuns.getAndIncrement() == 0) {
+                // We are on the delivering thread, queue emptied, flag still held. Another
+                // thread now evicts D, which queues a notification; its own delivery attempt
+                // finds the flag taken and gives up.
+                Thread other = new Thread(() -> cache.put("C", 3));
+                other.start();
+                try {
+                    other.join(10_000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        };
+
+        cache.put("D", 4);                              // evicts B; delivery begins on THIS thread
+
+        assertEquals(List.of(new Event("B", 2, RemovalCause.SIZE), new Event("D", 4, RemovalCause.SIZE)), events,
+                "D was queued while B was being finished off; it must be delivered by the time this call returns");
+    }
+
+    @Test
     @DisplayName("a cache with no listener still works and reports nothing anywhere")
     void noListener() {
         var cache = new VeloxCache<String, Integer>(2, new LruPolicy<>());

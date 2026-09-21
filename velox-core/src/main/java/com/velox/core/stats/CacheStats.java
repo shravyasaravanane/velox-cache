@@ -96,6 +96,25 @@ public record CacheStats(
     }
 
     /**
+     * Adds another snapshot to this one, field by field. Used to combine the
+     * per-shard statistics of a sharded cache into one total.
+     *
+     * @param other another snapshot
+     * @return the sum
+     */
+    public CacheStats plus(CacheStats other) {
+        return new CacheStats(
+                hitCount + other.hitCount,
+                missCount + other.missCount,
+                evictionCount + other.evictionCount,
+                loadCount + other.loadCount,
+                rejectionCount + other.rejectionCount,
+                expirationCount + other.expirationCount,
+                loadFailureCount + other.loadFailureCount,
+                coalescedCount + other.coalescedCount);
+    }
+
+    /**
      * Returns a copy with the loader-related counters replaced.
      *
      * <p>Those three counters are kept by the single-flight component, not by the

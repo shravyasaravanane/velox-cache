@@ -1,67 +1,74 @@
 package com.velox.core.stats;
 
+import com.velox.core.concurrent.StripedCounter;
+
 /**
- * The mutable counters behind {@link CacheStats}.
+ * The counters behind {@link CacheStats}.
  *
- * <p>Plain {@code long} fields, incremented without synchronisation. That is
- * correct for now because Tier 0 is single-threaded.
+ * <p>Each counter is a {@link StripedCounter}, so any thread may record an event at
+ * any time without a lock and without contending on one memory location. That
+ * matters for hits in particular: in the sharded cache a hit is recorded on the
+ * read path <i>without</i> holding the exclusive lock, by many threads at once, and
+ * a single shared {@code long} there would be both a data race and the hottest cache
+ * line in the program.
  *
- * <p>It will <b>not</b> stay correct. {@code count++} is really three
- * instructions — read, add, write — so two threads can both read 5, both
- * write 6, and one increment vanishes. Worse, a single shared counter becomes
- * the hottest memory address in the program: every core fights to own that
- * cache line, and the contention can cost more than the cache lookup itself.
- *
- * <p>Tier 2 replaces this with a striped, cache-line-padded counter. Keeping
- * the counters behind this small class is what makes that swap a one-file
- * change instead of a rewrite.
+ * <p>The cost is that a snapshot is not one instant: counters are read one after
+ * another while others may still be incrementing. Each is individually correct and
+ * counters only grow, so a snapshot is always a plausible state, never a corrupt one.
  */
 public final class StatsCounter {
 
-    private long hitCount;
-    private long missCount;
-    private long evictionCount;
-    private long rejectionCount;
-    private long expirationCount;
+    /** Few stripes are enough: a shard's counters are shared only by the threads using that shard. */
+    private static final int STRIPES = 4;
+
+    private final StripedCounter hits = new StripedCounter(STRIPES, true);
+    private final StripedCounter misses = new StripedCounter(STRIPES, true);
+    private final StripedCounter evictions = new StripedCounter(STRIPES, true);
+    private final StripedCounter rejections = new StripedCounter(STRIPES, true);
+    private final StripedCounter expirations = new StripedCounter(STRIPES, true);
 
     /** Records a lookup served from cache. */
     public void recordHit() {
-        hitCount++;
+        hits.increment();
     }
 
     /** Records a lookup that found nothing. */
     public void recordMiss() {
-        missCount++;
+        misses.increment();
     }
 
     /** Records an entry discarded to make room. */
     public void recordEviction() {
-        evictionCount++;
+        evictions.increment();
     }
 
     /** Records a candidate that an admission policy refused. */
     public void recordRejection() {
-        rejectionCount++;
+        rejections.increment();
     }
 
     /** Records an entry removed because its time-to-live ran out. */
     public void recordExpiration() {
-        expirationCount++;
+        expirations.increment();
     }
 
-    /** Resets every counter to zero. */
+    /**
+     * Resets every counter to zero.
+     *
+     * <p>Not atomic with respect to concurrent recording: an event recorded during
+     * the reset may or may not survive it. Intended for tests and quiet moments.
+     */
     public void reset() {
-        hitCount = 0;
-        missCount = 0;
-        evictionCount = 0;
-        rejectionCount = 0;
-        expirationCount = 0;
+        for (StripedCounter counter : new StripedCounter[]{hits, misses, evictions, rejections, expirations}) {
+            counter.add(-counter.sum());
+        }
     }
 
-    /** @return an immutable snapshot of the counters right now */
+    /** @return a snapshot of the counters; see the class comment on what "snapshot" means here */
     public CacheStats snapshot() {
         // Loader counters are zero here: the single-flight component owns them,
         // and the cache merges them in with CacheStats.withLoadCounts.
-        return new CacheStats(hitCount, missCount, evictionCount, 0, rejectionCount, expirationCount, 0, 0);
+        return new CacheStats(hits.sum(), misses.sum(), evictions.sum(), 0,
+                rejections.sum(), expirations.sum(), 0, 0);
     }
 }

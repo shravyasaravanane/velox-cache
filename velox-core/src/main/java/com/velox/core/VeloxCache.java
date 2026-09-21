@@ -14,9 +14,10 @@ import com.velox.core.util.Invariants;
 import com.velox.core.util.Ticker;
 
 import java.time.Duration;
-import java.util.ArrayDeque;
 import java.util.Objects;
 import java.util.SplittableRandom;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
 /**
@@ -135,11 +136,38 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
     /** Told when a value leaves the cache; {@code null} if nobody is listening. */
     private final RemovalListener<K, V> removalListener;
 
-    /** Removals waiting to be delivered. Only ever filled when a listener exists. */
-    private final ArrayDeque<Removal<K, V>> pendingRemovals = new ArrayDeque<>();
+    /**
+     * Removals waiting to be delivered. Only ever filled when a listener exists.
+     *
+     * <p>Concurrent because in the sharded cache removals are QUEUED while the shard
+     * lock is held but DELIVERED after it is released, by whichever thread gets there
+     * first: several threads may be adding to and draining this queue at once.
+     */
+    private final ConcurrentLinkedQueue<Removal<K, V>> pendingRemovals = new ConcurrentLinkedQueue<>();
 
-    /** True while notifications are being delivered, so a re-entrant call queues instead of nesting. */
-    private boolean dispatching;
+    /**
+     * True while one thread is delivering notifications. A second thread (or a
+     * re-entrant call from a listener) that finds it set simply leaves its
+     * notifications in the queue for the thread already delivering.
+     */
+    private final AtomicBoolean dispatching = new AtomicBoolean();
+
+    /**
+     * Whether public operations deliver notifications themselves. True for a
+     * standalone cache. A shard inside a {@link ShardedCache} sets this false, because
+     * the shard is being used under a lock and the owner delivers AFTER unlocking, so
+     * user code never runs while a lock is held.
+     */
+    private final boolean dispatchInline;
+
+    /**
+     * Test seam: runs on the delivering thread after the queue has been emptied but BEFORE
+     * the delivery flag is released. That is the exact window in which another thread can
+     * queue a notification whose own delivery attempt will fail (the flag is still held),
+     * and which the re-check after the release exists to cover. It is a few nanoseconds
+     * wide in real life, so the only way to test it deterministically is to stop there.
+     */
+    volatile Runnable beforeDeliveryFlagRelease;
 
     /** One queued notification. */
     private record Removal<K, V>(K key, V value, RemovalCause cause) {
@@ -192,8 +220,22 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
      */
     public VeloxCache(Capacity<K, V> capacity, EvictionPolicy<K, V> policy, ExpiryConfig expiryConfig,
                       Ticker ticker, ExpiryEngine<K, V> expiry, RemovalListener<K, V> removalListener) {
+        this(capacity, policy, expiryConfig, ticker, expiry, removalListener, true);
+    }
+
+    /**
+     * The constructor {@link ShardedCache} uses for its shards.
+     *
+     * @param dispatchInline whether public operations deliver removal notifications
+     *                       themselves; a shard passes {@code false} and the owner delivers
+     *                       them after releasing the shard lock
+     */
+    VeloxCache(Capacity<K, V> capacity, EvictionPolicy<K, V> policy, ExpiryConfig expiryConfig,
+               Ticker ticker, ExpiryEngine<K, V> expiry, RemovalListener<K, V> removalListener,
+               boolean dispatchInline) {
         Objects.requireNonNull(capacity, "capacity");
         this.removalListener = removalListener;
+        this.dispatchInline = dispatchInline;
         this.maximumWeight = capacity.maximumWeight();
         this.maximumEntries = capacity.maximumEntries();
         this.weigher = capacity.weigher();
@@ -212,7 +254,7 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
     @Override
     public V getIfPresent(K key) {
         V value = lookup(key);
-        dispatchRemovals();          // a lazily-expired entry is reported once the read is done
+        afterOperation();            // a lazily-expired entry is reported once the read is done
         return value;
     }
 
@@ -312,7 +354,7 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
     @Override
     public void put(K key, V value) {
         putInternal(key, value, -1);
-        dispatchRemovals();
+        afterOperation();
     }
 
     @Override
@@ -322,7 +364,7 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
             throw new IllegalArgumentException("ttl must be positive, got " + ttl);
         }
         putInternal(key, value, ttl.toNanos());
-        dispatchRemovals();
+        afterOperation();
     }
 
     /**
@@ -451,21 +493,23 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
         if (removed != null) {
             detach(removed, RemovalCause.EXPLICIT);
         }
-        dispatchRemovals();
+        afterOperation();
     }
 
     @Override
     public void invalidateAll() {
-        if (removalListener != null) {
-            // Everything is about to vanish in one sweep, bypassing detach(), so report
-            // each entry here. With no listener this scan is skipped entirely.
-            data.forEach(node -> enqueue(node.key(), node.value(), RemovalCause.EXPLICIT));
-        }
+        // Everything is about to vanish in one sweep, bypassing detach(), so each entry
+        // must be marked dead here (a buffered read record for it must be ignored later)
+        // and, if anyone is listening, reported.
+        data.forEach(node -> {
+            node.markDead();
+            enqueue(node.key(), node.value(), RemovalCause.EXPLICIT);
+        });
         data.clear();
         policy.clear();
         expiry.clear();
         weightedSize = 0;
-        dispatchRemovals();
+        afterOperation();
     }
 
     @Override
@@ -473,7 +517,7 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
         if (expiry.size() > 0) {
             drainExpired(ticker.read());
         }
-        dispatchRemovals();
+        afterOperation();
     }
 
     // ------------------------------------------------------------------
@@ -492,6 +536,7 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
      * call to the weigher, so the total cannot drift.
      */
     private void detach(Node<K, V> node, RemovalCause cause) {
+        node.markDead();                  // a buffered read record for it must now be ignored
         weightedSize -= node.weight();
         policy.onRemove(node);
         expiry.cancel(node);              // harmless if it was already polled out
@@ -532,24 +577,88 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
      * {@code finally} clears the flag and anything undelivered stays queued for the
      * next operation.
      */
-    private void dispatchRemovals() {
-        if (dispatching || pendingRemovals.isEmpty()) {
-            return;
+    /** Delivers queued notifications now, unless this cache is a shard whose owner does it after unlocking. */
+    private void afterOperation() {
+        if (dispatchInline) {
+            dispatchRemovals();
         }
-        dispatching = true;
-        try {
-            Removal<K, V> removal;
-            while ((removal = pendingRemovals.poll()) != null) {
-                try {
-                    removalListener.onRemoval(removal.key(), removal.value(), removal.cause());
-                } catch (RuntimeException e) {
-                    LOG.log(System.Logger.Level.WARNING,
-                            "removal listener threw for key " + removal.key() + " (" + removal.cause() + ")", e);
+    }
+
+    /**
+     * Delivers every queued notification. Safe to call from any thread, and harmless
+     * if another thread is already delivering.
+     *
+     * <p>The loop re-checks the queue AFTER releasing the flag. Another thread may have
+     * queued a notification just after our last poll; its own attempt to deliver failed
+     * because we still held the flag. Without the re-check that notification would sit
+     * in the queue until some unrelated later operation happened to flush it.
+     */
+    void dispatchRemovals() {
+        while (!pendingRemovals.isEmpty() && dispatching.compareAndSet(false, true)) {
+            try {
+                Removal<K, V> removal;
+                while ((removal = pendingRemovals.poll()) != null) {
+                    try {
+                        removalListener.onRemoval(removal.key(), removal.value(), removal.cause());
+                    } catch (RuntimeException e) {
+                        LOG.log(System.Logger.Level.WARNING,
+                                "removal listener threw for key " + removal.key() + " (" + removal.cause() + ")", e);
+                    }
                 }
+            } finally {
+                Runnable hook = beforeDeliveryFlagRelease;
+                if (hook != null) {
+                    hook.run();
+                }
+                dispatching.set(false);
             }
-        } finally {
-            dispatching = false;
         }
+    }
+
+    // ------------------------------------------------------------------
+    //  Support for ShardedCache (package-private)
+    // ------------------------------------------------------------------
+
+    /**
+     * A read-only lookup for the shared-lock read path.
+     *
+     * @return the entry if it is present and has not expired; {@code null} otherwise.
+     *         Changes NOTHING: no statistics, no policy update, no lazy removal
+     */
+    Node<K, V> findLive(K key, int hash) {
+        Node<K, V> node = data.get(key, hash);
+        if (node == null) {
+            return null;
+        }
+        if (node.hasDeadline() && isExpired(node, ticker.read())) {
+            return null;                  // the exclusive slow path removes it and reports it
+        }
+        return node;
+    }
+
+    /** Counts a hit that was served on the shared-lock path. Thread-safe. */
+    void recordHit() {
+        stats.recordHit();
+    }
+
+    /**
+     * Applies a buffered "this entry was used" record to the policy. Must be called
+     * under the shard write lock. Ignores entries that left the cache since the read.
+     */
+    void applyBufferedAccess(Node<K, V> node) {
+        if (!node.isDead()) {
+            policy.onAccess(node);
+        }
+    }
+
+    /** @return whether every read must update the expiry structure (expire-after-access) */
+    boolean expiresOnAccess() {
+        return expiryConfig.hasAccessTtl();
+    }
+
+    /** Visits every entry, in unspecified order. For invariant checks; the caller must hold the shard lock. */
+    void forEachNode(java.util.function.Consumer<Node<K, V>> action) {
+        data.forEach(action);
     }
 
     /** Removes every entry the expiry engine reports as due. */
