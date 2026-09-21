@@ -77,8 +77,19 @@ class ShardedCacheStressTest {
 
     @ParameterizedTest
     @EnumSource(Policy.class)
-    @DisplayName("16 threads: every value ever stored is resident OR reported exactly once, and the budget holds")
+    @DisplayName("16 threads, exclusive reads (the default): every value is resident OR reported exactly once")
     void conservationUnderConcurrency(Policy policy) throws Exception {
+        conservation(policy, false);
+    }
+
+    @ParameterizedTest
+    @EnumSource(Policy.class)
+    @DisplayName("16 threads, buffered reads (opt-in): every value is resident OR reported exactly once")
+    void conservationUnderConcurrencyBufferedReads(Policy policy) throws Exception {
+        conservation(policy, true);
+    }
+
+    private void conservation(Policy policy, boolean bufferedReads) throws Exception {
         final int opsPerThread = 25_000;
         final int keySpace = 300;
         final long budget = 600;
@@ -97,6 +108,7 @@ class ShardedCacheStressTest {
                 .policy(policy)
                 .expireAfterWrite(Duration.ofNanos(60_000))
                 .ticker(clock)
+                .bufferedReads(bufferedReads)
                 .readBufferSize(16)                     // tiny, so drains and drops happen constantly
                 .removalListener((key, val, cause) -> {
                     reported.incrementAndGet(val.id);
@@ -243,6 +255,7 @@ class ShardedCacheStressTest {
         var cache = (ShardedCache<Integer, Integer>) CacheBuilder.<Integer, Integer>newBuilder()
                 .maximumSize(2_000)
                 .concurrencyLevel(8)
+                .bufferedReads(true)
                 .readBufferSize(16)
                 .build();
         for (int i = 0; i < 500; i++) {
@@ -348,7 +361,7 @@ class ShardedCacheStressTest {
     @DisplayName("a steady stream of hits cannot starve writers")
     void writersAreNotStarved() throws Exception {
         var cache = (ShardedCache<Integer, Integer>) CacheBuilder.<Integer, Integer>newBuilder()
-                .maximumSize(1_000).concurrencyLevel(2).readBufferSize(16).build();
+                .maximumSize(1_000).concurrencyLevel(2).bufferedReads(true).readBufferSize(16).build();
         for (int i = 0; i < 100; i++) {
             cache.put(i, i);
         }

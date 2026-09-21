@@ -40,6 +40,28 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
+                <executions>
+                    <!--
+                      Second pass over the same tests with the internal consistency checks OFF,
+                      which is how the library runs in production. The first pass proves the
+                      structures stay valid; this one proves the code still behaves identically
+                      when the checks are not there to help (and covers the "checks disabled"
+                      branches). InvariantsTest only makes sense with the checks on.
+                    -->
+                    <execution>
+                        <id>production-config</id>
+                        <phase>test</phase>
+                        <goals><goal>test</goal></goals>
+                        <configuration>
+                            <systemPropertyVariables>
+                                <velox.assertions>false</velox.assertions>
+                            </systemPropertyVariables>
+                            <excludes>
+                                <exclude>**/InvariantsTest.java</exclude>
+                            </excludes>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
             <plugin>
                 <groupId>org.jacoco</groupId>

@@ -42,9 +42,16 @@ import java.util.function.Supplier;
  * requests wait for each other only if their keys land in the same shard, so
  * contention drops by roughly a factor of N.
  *
- * <h2>Layer 2: buffered reads</h2>
+ * <h2>Layer 2: buffered reads (opt-in, and measured not to help)</h2>
  *
- * Even within a shard, every read would need the exclusive lock to reorder the
+ * <b>This layer is off by default.</b> It was built as designed, and then benchmarked: it
+ * was never clearly faster than plain exclusive reads and was roughly 10-28% slower in some
+ * configurations (see {@code docs/benchmarks/thread-scaling.md}), because a shared lock
+ * still updates the lock word atomically. It stays available through
+ * {@code CacheBuilder.bufferedReads(true)}, and is what a future lock-free read path
+ * would replace.
+ *
+ * <p>Even within a shard, every read would need the exclusive lock to reorder the
  * recency list. Instead a <b>hit</b> takes only the shared (read) lock, so many
  * readers proceed together, finds its value, and drops "I used this entry" into a
  * lock-free {@link LossyReadBuffer}. The recency list is updated later, in a batch,

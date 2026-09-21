@@ -49,7 +49,7 @@ public final class CacheBuilder<K, V> {
     private int expectedEntries = -1;
     private RemovalListener<K, V> removalListener;
     private int concurrencyLevel = -1;             // -1 = single-threaded engine
-    private boolean bufferedReads = true;
+    private boolean bufferedReads = false;
     private int readBufferSize = 64;
     private long cleanUpEveryNanos = -1;
     private Policy policy = Policy.LRU;
@@ -266,9 +266,16 @@ public final class CacheBuilder<K, V> {
 
     /**
      * Whether hits in a sharded cache take only the shared lock and defer the recency
-     * update through a lock-free buffer (the default), or take the exclusive lock like
-     * every other operation. Turning it off exists so a benchmark can measure how much
-     * the buffering is worth; it has no effect without {@link #concurrencyLevel}.
+     * update through a lock-free buffer, or (the default) take the exclusive lock like
+     * every other operation.
+     *
+     * <p><b>Off by default because measurement did not justify it.</b> On the benchmark
+     * machine buffered reads were never clearly faster than exclusive reads (within noise
+     * at 64 shards, roughly 10-28% slower on a write-heavier workload and with few shards), while
+     * exclusive reads give exact LRU order and no dropped recency information. A shared
+     * lock still costs an atomic update to the lock word, so it does not remove the
+     * contention it was meant to remove. See {@code docs/benchmarks/thread-scaling.md}.
+     * It has no effect without {@link #concurrencyLevel}.
      *
      * @param enabled {@code true} for buffered reads
      * @return this builder

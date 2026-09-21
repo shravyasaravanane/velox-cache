@@ -290,6 +290,8 @@ A textbook LRU moves a node to the list head on every **read**. So every read mu
 
 **Measure this and put it in your report.** Benchmark `Collections.synchronizedMap(new LinkedHashMap<>(16, 0.75f, true))` at 1, 2, 4, 8 and 16 threads. Throughput will go *down* as threads go up. That single chart justifies this entire tier and is more persuasive than any amount of prose.
 
+**Measured** ([`docs/benchmarks/thread-scaling.md`](benchmarks/thread-scaling.md)): going from one thread to two makes a single-lock LRU **slower** (0.5-0.7x of its one-thread throughput), for both the textbook `synchronizedMap(LinkedHashMap)` and our own engine behind one lock, and it never recovers up to 16 threads. A `ConcurrentHashMap` on the same machine reaches 14-16x, so the lost throughput is the lock, not the hardware.
+
 ### 7.2 Four layered fixes
 
 #### Fix 1 — Sharding
@@ -303,6 +305,8 @@ shardIndex = spread(hash) >>> (32 - log2N);   // use the HIGH bits
 Use the **high** bits for shard selection, because the low bits are already consumed by the intra-shard map index. Reusing the same bits would correlate the two and cluster badly — a subtle bug that would quietly cost you hit ratio.
 
 Each shard owns its own map, policy, lock and capacity (`capacity / N`). Contention drops roughly N-fold.
+
+**Measured:** with 64 shards, 16 threads reach **3.4-3.9x** the throughput of one lock around the same engine (and 2.6-2.8x the synchronized `LinkedHashMap`). The shard *count* matters a great deal: with **1 or 4** shards, 16 threads perform like a single global lock (about 2,000-2,500 ops/ms versus 8,500+ at 64). "About as many shards as threads" is not enough; use several times more.
 
 *Trade-off to document honestly:* per-shard capacity makes eviction **locally** optimal, not globally. A shard that happens to receive unusually hot keys will evict entries a global LRU would have kept. **Measured** (`ShardingHitRatioExperiment`, Zipf 0.99 over 100,000 keys, 5M requests, identical request stream for every row):
 
@@ -342,6 +346,8 @@ final class LossyReadBuffer<K,V> {
 
 **This is the best "I made a deliberate engineering trade-off" story in the project, and it is exactly how Caffeine works.** Have the number ready: measure hit ratio with read buffers on versus off, and quote both.
 
+> **Measured outcome: the buffered-read layer did not pay off in this implementation, so it is off by default.** It was built and tested as described (the lossiness is harmless: 0.03-0.49% of hits dropped, hit ratio unchanged to within 0.05 points), but it was never clearly faster than plain exclusive reads: tied within noise on a read-heavy workload at 64 shards, roughly 10-28% *slower* on a write-heavier workload and with 1-4 shards. Likely reason (a hypothesis, not proven): a shared read lock still updates the lock's state word atomically, so readers of one shard contend on the same cache line, and the buffer adds a second atomic update per hit. Caffeine avoids both because its reads take *no* lock: a `ConcurrentHashMap` lookup plus a striped buffer. Getting that here would need a table that is safe to read during a write, which is a larger change. `CacheBuilder.bufferedReads(true)` opts in; the default is exact-LRU exclusive reads. Full data: [`docs/benchmarks/thread-scaling.md`](benchmarks/thread-scaling.md).
+
 #### Fix 3 — A single drainer, via a state machine
 
 Only one thread performs maintenance at a time; everyone else carries on unblocked.
@@ -379,6 +385,8 @@ final class StripedCounter {
 ```
 
 **Benchmark false sharing on and off.** A 3–5× throughput difference from *padding alone* makes a spectacular chart and proves you understand the hardware, not just the Big-O.
+
+**Measured** (`CounterBenchmark`): the striped padded counter is **53x** faster than one `AtomicLong` at 16 threads (the single cell gets *slower* as threads are added). Padding itself mattered **only at 16 threads (4.55x)**; at 8 threads or fewer the unpadded version was as fast, most likely because its 64 cells occupy only 8 cache lines, so with 8 or fewer threads the hash can spread them across separate lines, and with 16 some must share. So the "3-5x from padding" above holds only once threads outnumber cache lines, and the honest headline is that it is cheap insurance rather than a constant multiplier. Against the JDK's `LongAdder` the padded counter is 1.6-1.7x faster at 1-4 threads and 1.26x at 16.
 
 ### 7.3 The read and write paths, end to end
 

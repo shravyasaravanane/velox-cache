@@ -169,7 +169,7 @@ class ShardedCacheTest {
         // hit after that would be silently discarded and recency would quietly rot, with no
         // error anywhere. Single-threaded, a drain always succeeds, so nothing may drop.
         var cache = (ShardedCache<String, Integer>) CacheBuilder.<String, Integer>newBuilder()
-                .maximumSize(10).concurrencyLevel(1).readBufferSize(4).build();
+                .maximumSize(10).concurrencyLevel(1).bufferedReads(true).readBufferSize(4).build();
         cache.put("A", 1);
 
         for (int i = 0; i < 1_000; i++) {
@@ -193,6 +193,7 @@ class ShardedCacheTest {
         var cache = (ShardedCache<String, Integer>) CacheBuilder.<String, Integer>newBuilder()
                 .maximumSize(10)
                 .concurrencyLevel(1)
+                .bufferedReads(true)
                 .expireAfterWrite(Duration.ofHours(1))
                 .ticker(() -> {
                     ShardedCache<String, Integer> c = holder.get();
