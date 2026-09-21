@@ -14,6 +14,7 @@ import com.velox.core.util.Invariants;
 import com.velox.core.util.Ticker;
 
 import java.time.Duration;
+import java.util.ArrayDeque;
 import java.util.Objects;
 import java.util.SplittableRandom;
 import java.util.function.Function;
@@ -75,6 +76,15 @@ import java.util.function.Function;
  * Reading the clock costs real time (tens of nanoseconds), so a cache with no
  * TTLs configured never reads it.
  *
+ * <h2>Removal notifications</h2>
+ *
+ * A {@link RemovalListener} is told whenever a value leaves (evicted, expired,
+ * replaced or invalidated) and why. Because a listener is <i>user code</i>, it is
+ * never run in the middle of an update: {@link #detach} only <b>queues</b> a
+ * notification, and the queue is delivered by {@link #dispatchRemovals} once the
+ * public operation has finished and every invariant holds. See
+ * {@link RemovalListener} for the full contract.
+ *
  * <h2>Thread safety</h2>
  *
  * <b>None.</b> This class is single-threaded, deliberately, and that is
@@ -120,6 +130,21 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
      */
     private final SingleFlight<K, V> flight = new SingleFlight<>();
 
+    private static final System.Logger LOG = System.getLogger(VeloxCache.class.getName());
+
+    /** Told when a value leaves the cache; {@code null} if nobody is listening. */
+    private final RemovalListener<K, V> removalListener;
+
+    /** Removals waiting to be delivered. Only ever filled when a listener exists. */
+    private final ArrayDeque<Removal<K, V>> pendingRemovals = new ArrayDeque<>();
+
+    /** True while notifications are being delivered, so a re-entrant call queues instead of nesting. */
+    private boolean dispatching;
+
+    /** One queued notification. */
+    private record Removal<K, V>(K key, V value, RemovalCause cause) {
+    }
+
     /**
      * Creates a count-bounded cache with no configured expiry. Entries still
      * expire if given a per-entry TTL through {@link #put(Object, Object, Duration)}.
@@ -154,7 +179,21 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
      */
     public VeloxCache(Capacity<K, V> capacity, EvictionPolicy<K, V> policy, ExpiryConfig expiryConfig,
                       Ticker ticker, ExpiryEngine<K, V> expiry) {
+        this(capacity, policy, expiryConfig, ticker, expiry, null);
+    }
+
+    /**
+     * @param capacity        how full the cache may get: by entry count or by weight
+     * @param policy          the eviction strategy
+     * @param expiryConfig    how entries expire
+     * @param ticker          the time source; tests pass a fake one
+     * @param expiry          the engine that schedules expiry
+     * @param removalListener told when values leave the cache; may be {@code null}
+     */
+    public VeloxCache(Capacity<K, V> capacity, EvictionPolicy<K, V> policy, ExpiryConfig expiryConfig,
+                      Ticker ticker, ExpiryEngine<K, V> expiry, RemovalListener<K, V> removalListener) {
         Objects.requireNonNull(capacity, "capacity");
+        this.removalListener = removalListener;
         this.maximumWeight = capacity.maximumWeight();
         this.maximumEntries = capacity.maximumEntries();
         this.weigher = capacity.weigher();
@@ -172,6 +211,12 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
 
     @Override
     public V getIfPresent(K key) {
+        V value = lookup(key);
+        dispatchRemovals();          // a lazily-expired entry is reported once the read is done
+        return value;
+    }
+
+    private V lookup(K key) {
         Objects.requireNonNull(key, "key");
         int hash = Hashing.spread(key);
 
@@ -267,6 +312,7 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
     @Override
     public void put(K key, V value) {
         putInternal(key, value, -1);
+        dispatchRemovals();
     }
 
     @Override
@@ -276,6 +322,7 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
             throw new IllegalArgumentException("ttl must be positive, got " + ttl);
         }
         putInternal(key, value, ttl.toNanos());
+        dispatchRemovals();
     }
 
     /**
@@ -283,6 +330,7 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
      */
     private void putInternal(K key, V value, long explicitTtlNanos) {
         Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(value, "value");     // null would be indistinguishable from a miss
 
         // Weigh FIRST, before touching anything. A weigher that throws or returns
         // nonsense then leaves the cache exactly as it was.
@@ -308,11 +356,15 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
             if (growth <= 0) {
                 // Same size or lighter: update in place. No room is needed, and the
                 // entry keeps its position and history in the policy.
+                V previous = existing.value();
                 existing.setValue(value);
                 existing.setWeight(weight);
                 weightedSize += growth;
                 policy.onAccess(existing);           // a write counts as a use
                 applyWriteDeadline(existing, now, explicitTtlNanos);
+                if (previous != value) {
+                    enqueue(key, previous, RemovalCause.REPLACED);   // the OLD value has left
+                }
                 return;
             }
 
@@ -337,6 +389,7 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
             // will not fit would be pure loss. If this replaced an existing key, the
             // old value was removed above, so a stale value is never served.
             stats.recordRejection();
+            enqueue(key, value, RemovalCause.SIZE);   // never stored, but the cache did not keep it
             return;
         }
 
@@ -348,6 +401,7 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
             Node<K, V> victim = policy.selectVictim();
             if (victim == null) {
                 stats.recordRejection();     // unreachable in practice: nothing left to evict
+                enqueue(key, value, RemovalCause.SIZE);
                 return;
             }
 
@@ -361,6 +415,7 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
             // impossible for policies like CLOCK whose victim search mutates state.
             if (!policy.admit(candidate, victim)) {
                 stats.recordRejection();
+                enqueue(key, value, RemovalCause.SIZE);   // refused on the way in: still reported
                 return;
             }
             data.remove(victim.key(), victim.hash());
@@ -396,14 +451,21 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
         if (removed != null) {
             detach(removed, RemovalCause.EXPLICIT);
         }
+        dispatchRemovals();
     }
 
     @Override
     public void invalidateAll() {
+        if (removalListener != null) {
+            // Everything is about to vanish in one sweep, bypassing detach(), so report
+            // each entry here. With no listener this scan is skipped entirely.
+            data.forEach(node -> enqueue(node.key(), node.value(), RemovalCause.EXPLICIT));
+        }
         data.clear();
         policy.clear();
         expiry.clear();
         weightedSize = 0;
+        dispatchRemovals();
     }
 
     @Override
@@ -411,6 +473,7 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
         if (expiry.size() > 0) {
             drainExpired(ticker.read());
         }
+        dispatchRemovals();
     }
 
     // ------------------------------------------------------------------
@@ -432,10 +495,60 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
         weightedSize -= node.weight();
         policy.onRemove(node);
         expiry.cancel(node);              // harmless if it was already polled out
+        enqueue(node.key(), node.value(), cause);
         switch (cause) {
             case SIZE -> stats.recordEviction();
             case EXPIRED -> stats.recordExpiration();
             default -> { /* explicit and replaced removals are not symptoms of anything */ }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    //  Removal notifications
+    // ------------------------------------------------------------------
+
+    /** Queues a notification. Does nothing (and allocates nothing) if nobody is listening. */
+    private void enqueue(K key, V value, RemovalCause cause) {
+        if (removalListener != null) {
+            pendingRemovals.add(new Removal<>(key, value, cause));
+        }
+    }
+
+    /**
+     * Delivers queued notifications. Called at the END of each public operation,
+     * when the cache is fully consistent, so a listener never sees (or is able to
+     * disturb) a half-finished update.
+     *
+     * <p>If a listener calls back into the cache, that inner call queues its own
+     * removals and returns straight away ({@code dispatching} is already set); this
+     * loop then delivers them, in order, after the current listener has returned.
+     * Without that guard the inner call would deliver its notifications
+     * <i>inside</i> the outer listener, out of order and one stack frame deeper per
+     * cascade.
+     *
+     * <p>A {@link RuntimeException} from a listener is logged and the loop carries
+     * on: one broken listener call must not lose the other notifications or fail the
+     * operation that triggered them. An {@link Error} escapes, but the
+     * {@code finally} clears the flag and anything undelivered stays queued for the
+     * next operation.
+     */
+    private void dispatchRemovals() {
+        if (dispatching || pendingRemovals.isEmpty()) {
+            return;
+        }
+        dispatching = true;
+        try {
+            Removal<K, V> removal;
+            while ((removal = pendingRemovals.poll()) != null) {
+                try {
+                    removalListener.onRemoval(removal.key(), removal.value(), removal.cause());
+                } catch (RuntimeException e) {
+                    LOG.log(System.Logger.Level.WARNING,
+                            "removal listener threw for key " + removal.key() + " (" + removal.cause() + ")", e);
+                }
+            }
+        } finally {
+            dispatching = false;
         }
     }
 

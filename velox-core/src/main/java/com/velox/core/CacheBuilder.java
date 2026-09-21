@@ -46,6 +46,7 @@ public final class CacheBuilder<K, V> {
     private long maximumWeight = -1;             // -1 = not set
     private Weigher<K, V> weigher;
     private int expectedEntries = -1;
+    private RemovalListener<K, V> removalListener;
     private Policy policy = Policy.LRU;
     private long expireAfterWriteNanos = -1;
     private long expireAfterAccessNanos = -1;
@@ -218,6 +219,19 @@ public final class CacheBuilder<K, V> {
     }
 
     /**
+     * Registers a listener that is told whenever a value leaves the cache, and why.
+     * See {@link RemovalListener} for exactly what is reported, when, and what the
+     * listener may do.
+     *
+     * @param listener called for every removal; must not be {@code null}
+     * @return this builder
+     */
+    public CacheBuilder<K, V> removalListener(RemovalListener<K, V> listener) {
+        this.removalListener = Objects.requireNonNull(listener, "listener");
+        return this;
+    }
+
+    /**
      * Replaces the time source. Intended for tests, which pass a fake clock so
      * expiry can be checked exactly without waiting.
      *
@@ -241,7 +255,7 @@ public final class CacheBuilder<K, V> {
             // The wheel counts time from its creation, so it starts at "now".
             case TIMING_WHEEL -> new WheelExpiryEngine<>(wheelTickNanos, wheelSize, ticker.read());
         };
-        return new VeloxCache<>(capacity, evictionPolicy, expiry, ticker, engine);
+        return new VeloxCache<>(capacity, evictionPolicy, expiry, ticker, engine, removalListener);
     }
 
     /**
