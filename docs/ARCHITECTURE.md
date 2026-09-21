@@ -230,28 +230,37 @@ actualTtl = ttl * (1 + jitter * (random() * 2 - 1));   // jitter ≈ 0.15
 When a hot key expires and 1,000 concurrent requests miss at the same instant, a naive cache-aside issues **1,000 identical database queries** at the worst possible moment. This is cache breakdown, the thundering herd — and one of the most frequently asked system-design interview questions.
 
 ```java
-final class SingleFlight<K, V> {
-    private final ConcurrentHashMap<K, CompletableFuture<V>> inFlight = new ConcurrentHashMap<>();
+// velox-core/src/main/java/com/velox/core/loader/SingleFlight.java (abridged)
+public V load(K key, Function<? super K, ? extends V> loader) {
+    Call<V> mine = new Call<>(Thread.currentThread());
+    Call<V> existing = inFlight.putIfAbsent(key, mine);       // atomic election: one winner
+    if (existing != null) return follow(key, existing);       // FOLLOWER: wait for the leader's result
 
-    V load(K key, Function<K, V> loader) {
-        CompletableFuture<V> mine = new CompletableFuture<>();
-        CompletableFuture<V> existing = inFlight.putIfAbsent(key, mine);
-        if (existing != null) return existing.join();          // coalesced: just wait
-        try {
-            V v = loader.apply(key);                           // exactly one loader runs
-            mine.complete(v);
-            return v;
-        } catch (Throwable t) {
-            mine.completeExceptionally(t);
-            throw t;
-        } finally {
-            inFlight.remove(key, mine);                        // always — even on failure
-        }
+    loads.increment();                                        // LEADER: run the loader on this thread
+    try {
+        V value = loader.apply(key);
+        mine.value = value;
+        return value;
+    } catch (RuntimeException | Error e) {
+        failures.increment();
+        mine.failure = e;                                     // followers receive this same failure
+        throw e;
+    } finally {
+        inFlight.remove(key, mine);                           // remove FIRST ...
+        mine.done.countDown();                                // ... THEN release the followers
     }
 }
 ```
 
-**Headline metric for the Chaos Panel:** *1,000 concurrent requests for one cold key → **1,000 DB queries** without single-flight, **1** with it.* That is the most quotable number in the entire project.
+Design decisions, each enforced by a test (see `SingleFlightTest`):
+
+- **The leader's own thread runs the loader** — no thread pool, natural backpressure.
+- **Failures are shared but never cached**: every waiting caller gets the same exception, and the next caller retries fresh.
+- **The entry is removed *before* followers are released.** The gap is nanoseconds, so a naive test can never see the violation; the test parks the leader inside `ConcurrentHashMap.remove` using a key whose `hashCode()` blocks.
+- **A loader asking for its own key fails loudly** instead of deadlocking (same-thread cycles are detected; cross-thread cycles cannot be, cheaply).
+- **Counters are `LongAdder`s**, and `coalesced` is incremented *before* a follower blocks, which is what lets tests wait deterministically for "all followers are waiting".
+
+**Headline metric for the Chaos Panel:** *1,000 concurrent requests for one cold key → **1,000 DB queries** without single-flight, **1** with it.* That is the most quotable number in the entire project. **Measured** (`StampedeTest`, an expired hot key hit by 500 simultaneous requests): **500 database queries without single-flight, 1 with it (499 coalesced).**
 
 ### 6.4 The four cache failure modes (implement all four defences)
 
@@ -262,7 +271,7 @@ final class SingleFlight<K, V> {
 | **Penetration** | requests for keys that don't exist in the DB at all (often an attack) | **Bloom filter** of all DB keys + negative caching with a short TTL |
 | **Cold start** | cache restarts empty → every request misses at once | **Snapshot + WAL warm restart** (Tier 8) |
 
-Two more patterns worth implementing alongside them:
+Two more patterns worth implementing alongside them (**deferred to Tier 2**: refresh-ahead needs a background executor reloading into a thread-safe cache, and stale-while-error needs expired entries to be *retained*, which contradicts the "expired data is never served" guarantee the engine currently makes and needs an explicit, opt-in grace period):
 
 - **Refresh-ahead** — when a hot entry is within 20% of its TTL, reload it asynchronously while continuing to serve the current value. The user never experiences the miss.
 - **Stale-while-revalidate** — if the loader throws, keep serving the stale value rather than propagating the error. Availability over freshness, which is the right trade-off for a cache.

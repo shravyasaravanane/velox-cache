@@ -3,6 +3,7 @@ package com.velox.core;
 import com.velox.core.expiry.ExpiryConfig;
 import com.velox.core.expiry.ExpiryEngine;
 import com.velox.core.expiry.HeapExpiryEngine;
+import com.velox.core.loader.SingleFlight;
 import com.velox.core.policy.EvictionPolicy;
 import com.velox.core.stats.CacheStats;
 import com.velox.core.stats.StatsCounter;
@@ -113,6 +114,13 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
     private final StatsCounter stats = new StatsCounter();
 
     /**
+     * Makes concurrent misses on one key share a single load. It is separate from
+     * the cache's own state, and thread-safe on its own, because loads are slow and
+     * must never run while a cache lock is held.
+     */
+    private final SingleFlight<K, V> flight = new SingleFlight<>();
+
+    /**
      * Creates a count-bounded cache with no configured expiry. Entries still
      * expire if given a per-entry TTL through {@link #put(Object, Object, Duration)}.
      *
@@ -216,18 +224,26 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
             return cached;
         }
 
-        // MISS: compute the value and cache it.
+        // MISS. If a thousand threads miss on this key at the same instant (a hot
+        // entry just expired, say) only ONE of them runs the loader; the rest wait
+        // and share its result. Without this, a cache turns one slow database row
+        // into a thousand identical queries at the worst possible moment.
         //
-        // Note what is missing here. If a thousand threads miss on the same
-        // hot key at the same instant, this runs the loader a thousand times
-        // for one database row -- a "cache stampede". A later step adds
-        // single-flight coalescing so only one loader runs.
-        stats.recordLoad();
-        V loaded = loader.apply(key);
-        if (loaded != null) {
-            put(key, loaded);
-        }
-        return loaded;
+        // Only the LEADER executes the function below, so only the leader stores the
+        // value; followers just receive it. The loader itself runs here, outside any
+        // manipulation of cache state, which is what will let Tier 2 call it without
+        // holding a shard lock (a lock held across a slow database call would
+        // serialise every request that maps to that shard).
+        //
+        // A loader that throws caches nothing: the failure goes to every waiting
+        // caller, and the next caller starts a fresh attempt.
+        return flight.load(key, k -> {
+            V loaded = loader.apply(k);
+            if (loaded != null) {
+                put(k, loaded);
+            }
+            return loaded;
+        });
     }
 
     @Override
@@ -521,7 +537,8 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
 
     @Override
     public CacheStats stats() {
-        return stats.snapshot();
+        // The cache's own counters plus the loader counters kept by SingleFlight.
+        return stats.snapshot().withLoadCounts(flight.loads(), flight.failures(), flight.coalesced());
     }
 
     /** @return the name of the active eviction policy, e.g. {@code "LRU"} */

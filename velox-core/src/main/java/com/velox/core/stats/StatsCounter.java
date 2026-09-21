@@ -21,7 +21,6 @@ public final class StatsCounter {
     private long hitCount;
     private long missCount;
     private long evictionCount;
-    private long loadCount;
     private long rejectionCount;
     private long expirationCount;
 
@@ -40,11 +39,6 @@ public final class StatsCounter {
         evictionCount++;
     }
 
-    /** Records a loader running to fill a miss. */
-    public void recordLoad() {
-        loadCount++;
-    }
-
     /** Records a candidate that an admission policy refused. */
     public void recordRejection() {
         rejectionCount++;
@@ -60,13 +54,14 @@ public final class StatsCounter {
         hitCount = 0;
         missCount = 0;
         evictionCount = 0;
-        loadCount = 0;
         rejectionCount = 0;
         expirationCount = 0;
     }
 
     /** @return an immutable snapshot of the counters right now */
     public CacheStats snapshot() {
-        return new CacheStats(hitCount, missCount, evictionCount, loadCount, rejectionCount, expirationCount);
+        // Loader counters are zero here: the single-flight component owns them,
+        // and the cache merges them in with CacheStats.withLoadCounts.
+        return new CacheStats(hitCount, missCount, evictionCount, 0, rejectionCount, expirationCount, 0, 0);
     }
 }

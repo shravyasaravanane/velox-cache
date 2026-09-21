@@ -31,10 +31,14 @@ package com.velox.core.stats;
  * @param hitCount       requests served from cache
  * @param missCount      requests that found nothing
  * @param evictionCount  entries dropped to make room (not manual removals)
- * @param loadCount      times a loader ran to fill a miss
+ * @param loadCount      times a loader actually ran to fill a miss
  * @param rejectionCount candidates that were not cached: refused by an admission
  *                       policy, or heavier than the whole cache
  * @param expirationCount entries removed because their time-to-live ran out
+ * @param loadFailureCount loader runs that threw instead of returning a value
+ * @param coalescedCount  lookups that did NOT run a loader because another thread was
+ *                        already loading the same key: the database queries a stampede
+ *                        would have caused and did not
  */
 public record CacheStats(
         long hitCount,
@@ -42,10 +46,12 @@ public record CacheStats(
         long evictionCount,
         long loadCount,
         long rejectionCount,
-        long expirationCount) {
+        long expirationCount,
+        long loadFailureCount,
+        long coalescedCount) {
 
     /** A snapshot with every counter at zero. */
-    public static final CacheStats EMPTY = new CacheStats(0, 0, 0, 0, 0, 0);
+    public static final CacheStats EMPTY = new CacheStats(0, 0, 0, 0, 0, 0, 0, 0);
 
     /** @return total lookups, hits plus misses */
     public long requestCount() {
@@ -84,13 +90,30 @@ public record CacheStats(
                 Math.max(0, evictionCount - earlier.evictionCount),
                 Math.max(0, loadCount - earlier.loadCount),
                 Math.max(0, rejectionCount - earlier.rejectionCount),
-                Math.max(0, expirationCount - earlier.expirationCount));
+                Math.max(0, expirationCount - earlier.expirationCount),
+                Math.max(0, loadFailureCount - earlier.loadFailureCount),
+                Math.max(0, coalescedCount - earlier.coalescedCount));
+    }
+
+    /**
+     * Returns a copy with the loader-related counters replaced.
+     *
+     * <p>Those three counters are kept by the single-flight component, not by the
+     * cache: they are bumped by whichever thread happens to lead or follow a load,
+     * so they need to be thread-safe in a way the cache's own counters are not.
+     * The cache merges them into its snapshot with this method.
+     */
+    public CacheStats withLoadCounts(long loads, long failures, long coalesced) {
+        return new CacheStats(hitCount, missCount, evictionCount, loads, rejectionCount,
+                expirationCount, failures, coalesced);
     }
 
     @Override
     public String toString() {
         return String.format(
-                "CacheStats{hits=%d, misses=%d, hitRate=%.2f%%, evictions=%d, expirations=%d, loads=%d, rejections=%d}",
-                hitCount, missCount, hitRate() * 100, evictionCount, expirationCount, loadCount, rejectionCount);
+                "CacheStats{hits=%d, misses=%d, hitRate=%.2f%%, evictions=%d, expirations=%d, loads=%d, "
+                        + "loadFailures=%d, coalesced=%d, rejections=%d}",
+                hitCount, missCount, hitRate() * 100, evictionCount, expirationCount, loadCount,
+                loadFailureCount, coalescedCount, rejectionCount);
     }
 }

@@ -22,7 +22,6 @@ class StatsCounterTest {
         counter.recordHit();
         counter.recordMiss();
         counter.recordEviction();
-        counter.recordLoad();
         counter.recordRejection();
         counter.recordExpiration();
 
@@ -30,7 +29,6 @@ class StatsCounterTest {
         assertEquals(2, stats.hitCount());
         assertEquals(1, stats.missCount());
         assertEquals(1, stats.evictionCount());
-        assertEquals(1, stats.loadCount());
         assertEquals(1, stats.rejectionCount());
         assertEquals(1, stats.expirationCount());
         assertEquals(3, stats.requestCount());
@@ -43,7 +41,6 @@ class StatsCounterTest {
         counter.recordHit();
         counter.recordMiss();
         counter.recordEviction();
-        counter.recordLoad();
         counter.recordRejection();
         counter.recordExpiration();
 
@@ -80,8 +77,8 @@ class StatsCounterTest {
         // This is how the Tier 6 dashboard charts a LIVE hit rate: counters
         // only ever climb, so a raw snapshot describes the cache's entire
         // lifetime. Subtracting the previous snapshot gives the last second.
-        var earlier = new CacheStats(100, 20, 5, 3, 1, 7);
-        var later = new CacheStats(150, 25, 8, 4, 1, 12);
+        var earlier = new CacheStats(100, 20, 5, 3, 1, 7, 2, 40);
+        var later = new CacheStats(150, 25, 8, 4, 1, 12, 3, 940);
 
         CacheStats delta = later.minus(earlier);
 
@@ -91,6 +88,8 @@ class StatsCounterTest {
         assertEquals(1, delta.loadCount());
         assertEquals(0, delta.rejectionCount());
         assertEquals(5, delta.expirationCount());
+        assertEquals(1, delta.loadFailureCount());
+        assertEquals(900, delta.coalescedCount());
     }
 
     @Test
@@ -99,8 +98,8 @@ class StatsCounterTest {
         // Snapshots can arrive out of order once several threads report
         // metrics. A negative "hits per second" on a dashboard is nonsense,
         // so we clamp instead of propagating it.
-        var later = new CacheStats(10, 10, 10, 10, 10, 10);
-        var earlier = new CacheStats(100, 100, 100, 100, 100, 100);
+        var later = new CacheStats(10, 10, 10, 10, 10, 10, 10, 10);
+        var earlier = new CacheStats(100, 100, 100, 100, 100, 100, 100, 100);
 
         CacheStats delta = later.minus(earlier);
 
@@ -112,12 +111,27 @@ class StatsCounterTest {
     @Test
     @DisplayName("toString reports the hit rate as a readable percentage")
     void toStringIsReadable() {
-        var stats = new CacheStats(75, 25, 10, 5, 2, 3);
+        var stats = new CacheStats(75, 25, 10, 5, 2, 3, 1, 42);
 
         String text = stats.toString();
 
         assertTrue(text.contains("hits=75"), text);
         assertTrue(text.contains("75.00%"), "expected a formatted hit rate in: " + text);
+    }
+
+    @Test
+    @DisplayName("withLoadCounts replaces only the loader counters")
+    void withLoadCountsReplacesOnlyLoaderCounters() {
+        var base = new CacheStats(75, 25, 10, 0, 2, 3, 0, 0);
+
+        CacheStats merged = base.withLoadCounts(9, 4, 990);
+
+        assertEquals(9, merged.loadCount());
+        assertEquals(4, merged.loadFailureCount());
+        assertEquals(990, merged.coalescedCount());
+        assertEquals(75, merged.hitCount(), "everything else must be carried over untouched");
+        assertEquals(3, merged.expirationCount());
+        assertTrue(merged.toString().contains("coalesced=990"), merged.toString());
     }
 
     @Test
