@@ -26,6 +26,7 @@
     <!-- The sub-projects. We add more here as we reach later tiers. -->
     <modules>
         <module>velox-core</module>
+        <module>velox-bench</module>
     </modules>
 
     <properties>
@@ -37,6 +38,7 @@
         <junit.version>5.11.4</junit.version>
         <surefire.version>3.5.2</surefire.version>
         <jacoco.version>0.8.12</jacoco.version>
+        <jmh.version>1.37</jmh.version>
     </properties>
 
     <!--

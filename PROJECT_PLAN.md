@@ -101,13 +101,13 @@ Build **strictly in tier order**. Every tier ends at a demoable, committable, de
 <details>
 <summary><b>Tier 2 — Concurrency</b></summary>
 
-- [ ] **M2.1** `ShardRouter` — power-of-two shards, high-bit hash spreading
+- [x] **M2.1** `ShardRouter` — power-of-two shards, shard chosen from the **high** hash bits (a test demonstrates that routing by the low bits collapses each shard's table onto a single slot). *Component only; the sharded cache itself is next.*
 - [ ] **M2.2** Per-shard `ReentrantReadWriteLock`; write path correct under stress
-- [ ] **M2.3** `LossyReadBuffer` — MPSC ring, CAS append, drop-on-full
-- [ ] **M2.4** `DrainStatus` state machine (IDLE → REQUIRED → PROCESSING → PROCESSING_TO_REQUIRED)
-- [ ] **M2.5** `StripedCounter` with cache-line padding to kill false sharing
+- [x] **M2.3** `LossyReadBuffer` — multi-producer / single-consumer ring, CAS claim then publish, drops on full or contention. Multi-producer stress test checks nothing is invented, duplicated or reordered per producer, and that `consumed + dropped == offered`. *Component only; not yet wired into the cache.*
+- [x] **M2.4** `DrainStatus` state machine (IDLE → REQUIRED → PROCESSING_TO_IDLE → PROCESSING_TO_REQUIRED) — a drain request that arrives *during* a drain is remembered, not lost. Checked against an explicit transition table over 200,000 random operations.
+- [x] **M2.5** `StripedCounter` — padded cells (128 B apart) to avoid false sharing; `padded=false` exists so a benchmark can measure what the padding is worth. Exact under 16-thread contention. *Not yet wired into `StatsCounter`; the false-sharing benchmark is still to do.*
 - [ ] **M2.6** Stress harness: 16 threads × 10M ops, invariants hold, capacity never exceeded
-- [ ] **M2.7** First JMH run — publish the thread-scaling curve
+- [ ] **M2.7** JMH thread-scaling curve — **baseline measured** (`docs/benchmarks/thread-scaling.md`): a global lock makes both LRU caches ~2x *slower* going from 1 to 2 threads. The sharded / lock-free-read curves are still to do.
 - [ ] **M2.8** Refresh-ahead (reload a hot entry in the background before it expires) + opt-in stale-while-error grace period + the background expiry sweeper thread (all deferred from Tier 1: they need a thread-safe cache)
 - [ ] ✅ **Checkpoint:** near-linear throughput scaling to 8 threads
 </details>
