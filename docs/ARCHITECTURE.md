@@ -35,7 +35,7 @@ Cache<Long, Product> cache = CacheBuilder.<Long, Product>newBuilder()
     .ttlJitter(0.15)                            // ±15% to prevent avalanche
     .refreshAfterWrite(Duration.ofMinutes(8))   // refresh-ahead for hot keys
     .concurrencyLevel(16)                       // shard-count hint
-    .expiryEngine(ExpiryEngine.TIMING_WHEEL)    // or INDEXED_HEAP
+    .expiryEngine(ExpiryEngineType.TIMING_WHEEL)    // or INDEXED_HEAP (the default)
     .recordStats()
     .removalListener((k, v, cause) -> log.debug("evicted {} due to {}", k, cause))
     .build(productRepository::findById);        // CacheLoader
@@ -198,7 +198,18 @@ freqHead ──► [freq=1] ──► [freq=2] ──► [freq=5] ──► [fre
 
 **Engine B — Hierarchical timing wheel.** Four levels with tick sizes 1s / 1m / 1h / 1d and 60–64 buckets each, exactly like Kafka's purgatory and Netty's `HashedWheelTimer`. Scheduling computes a bucket and appends to its list → **O(1)**. Cancellation unlinks from the bucket list → **O(1)**. On each tick, the current bucket fires; higher-level wheels *cascade* their expiring bucket down into the level below.
 
-**Why build both?** So you can benchmark them and report something like: *"the timing wheel scheduled 3.1× faster but used 12% more memory; the heap wins below roughly 50k entries."* Two implementations plus a measured crossover point is exactly what a capstone should contain — it is the difference between "I implemented a timing wheel" and "I know when to use one."
+**Why build both?** So you can benchmark them and report a measured crossover point — the difference between "I implemented a timing wheel" and "I know when to use one."
+
+**What we actually measured** (informal harness, one laptop, `ExpiryEngineComparison`; Tier 4 replaces it with JMH). An earlier draft of this section guessed "3.1× faster, heap wins below ~50k"; the measurements are more modest:
+
+| Entries | Reschedule churn (heap / wheel, ns) | Whole lifecycle (heap / wheel, ns) |
+|---|---|---|
+| 1,000 | 72 / 68 — tie | 337 / 1795 — **heap 5.3×** |
+| 10,000 | 95 / 92 — tie | 308 / 651 — **heap 2.1×** |
+| 100,000 | 245 / 163 — **wheel 1.5×** | 486 / 489 — tie |
+| 1,000,000 | 1025 / 613 — **wheel 1.7×** | 1959 / 843 — **wheel 2.3×** |
+
+The crossover is near **100,000 entries**. The wheel loses at small sizes because its cost tracks elapsed *time* (the hand must sweep) whereas the heap's tracks the number of *entries*. Memory was not measured. The heap stays the default.
 
 **Three complementary expiry mechanisms** — Redis uses all three, and so should you:
 

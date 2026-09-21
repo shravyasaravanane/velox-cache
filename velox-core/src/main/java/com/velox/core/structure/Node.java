@@ -140,6 +140,20 @@ public final class Node<K, V> {
     int heapIndex = -1;
 
     /**
+     * Timing-wheel bucket links: the previous/next node in the same wheel bucket.
+     *
+     * <p>These cannot reuse {@link #prev}/{@link #next}. Those already link this
+     * node into the eviction policy's list, and a node cannot sit in two linked
+     * lists using one pair of pointers. So the expiry wheel gets its own pair --
+     * the price of an entry being tracked by two structures at once.
+     */
+    Node<K, V> wheelPrev;
+    Node<K, V> wheelNext;
+
+    /** The wheel bucket currently holding this node, or {@code null}; gives O(1) cancellation. */
+    Object wheelBucket;
+
+    /**
      * Creates a data-carrying node.
      *
      * @param key   the cache key (must not be null)

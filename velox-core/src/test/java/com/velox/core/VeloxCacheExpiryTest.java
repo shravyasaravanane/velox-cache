@@ -1,8 +1,8 @@
 package com.velox.core;
 
 import com.velox.core.expiry.ExpiryConfig;
+import com.velox.core.expiry.ExpiryEngine;
 import com.velox.core.expiry.FakeTicker;
-import com.velox.core.expiry.HeapExpiryEngine;
 import com.velox.core.policy.LruPolicy;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -21,18 +21,30 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Expiry behaviour, checked against a fake clock so every boundary is exact.
+ *
+ * <p>This class is abstract: it states what ANY expiry engine must do, and each
+ * concrete subclass supplies one engine. Every test here therefore runs once
+ * per engine, so the indexed heap and the timing wheel are held to exactly the
+ * same behaviour and any divergence between them is a failure.
  */
-class VeloxCacheExpiryTest {
+abstract class VeloxCacheExpiryTest {
 
     private static final Duration S = Duration.ofSeconds(1);
 
-    private static VeloxCache<String, Integer> cache(
+    /**
+     * @return a fresh engine to test. The fake clock starts at 0, so a wheel is
+     *         built with a start time of 0 (reading the ticker instead would
+     *         count as a clock read and break the "no clock reads" test).
+     */
+    protected abstract ExpiryEngine<String, Integer> newEngine();
+
+    protected VeloxCache<String, Integer> cache(
             int capacity, FakeTicker ticker, long writeSeconds, long accessSeconds, double jitter) {
         var config = new ExpiryConfig(
                 writeSeconds < 0 ? -1 : S.toNanos() * writeSeconds,
                 accessSeconds < 0 ? -1 : S.toNanos() * accessSeconds,
                 jitter);
-        return new VeloxCache<>(capacity, new LruPolicy<>(), config, ticker, new HeapExpiryEngine<>());
+        return new VeloxCache<>(capacity, new LruPolicy<>(), config, ticker, newEngine());
     }
 
     // ------------------------------------------------------------------
@@ -444,14 +456,14 @@ class VeloxCacheExpiryTest {
         }
     }
 
-    private static void differential(long writeTicks, long accessTicks, long seed) {
+    protected void differential(long writeTicks, long accessTicks, long seed) {
         final long tick = 1_000;                       // nanoseconds per model "tick"
         var clock = new FakeTicker();
         var real = new VeloxCache<String, Integer>(
                 10_000, new LruPolicy<>(),
                 new ExpiryConfig(writeTicks < 0 ? -1 : writeTicks * tick,
                         accessTicks < 0 ? -1 : accessTicks * tick, 0),
-                clock, new HeapExpiryEngine<>());
+                clock, newEngine());
         var naive = new NaiveTtlCache(writeTicks < 0 ? -1 : writeTicks * tick,
                 accessTicks < 0 ? -1 : accessTicks * tick);
         var random = new Random(seed);

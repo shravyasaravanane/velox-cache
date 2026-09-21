@@ -1,7 +1,10 @@
 package com.velox.core;
 
 import com.velox.core.expiry.ExpiryConfig;
+import com.velox.core.expiry.ExpiryEngine;
+import com.velox.core.expiry.ExpiryEngineType;
 import com.velox.core.expiry.HeapExpiryEngine;
+import com.velox.core.expiry.WheelExpiryEngine;
 import com.velox.core.policy.EvictionPolicy;
 import com.velox.core.policy.Policy;
 import com.velox.core.util.Ticker;
@@ -45,6 +48,9 @@ public final class CacheBuilder<K, V> {
     private long expireAfterAccessNanos = -1;
     private double ttlJitter = 0;
     private Ticker ticker = Ticker.system();
+    private ExpiryEngineType expiryEngineType = ExpiryEngineType.INDEXED_HEAP;
+    private long wheelTickNanos = 1_000_000;      // 1 ms
+    private int wheelSize = 64;
 
     private CacheBuilder() {
     }
@@ -130,6 +136,39 @@ public final class CacheBuilder<K, V> {
     }
 
     /**
+     * Chooses how expiry is scheduled: an indexed heap (the default) or a
+     * hierarchical timing wheel with 1 ms ticks and 64 slots per level.
+     *
+     * @param type the scheduling strategy
+     * @return this builder
+     */
+    public CacheBuilder<K, V> expiryEngine(ExpiryEngineType type) {
+        this.expiryEngineType = Objects.requireNonNull(type, "type");
+        return this;
+    }
+
+    /**
+     * Uses a hierarchical timing wheel for expiry, with the given geometry.
+     *
+     * <p>A finer tick means less scanning of the current slot but more levels
+     * to cascade through; a larger wheel does the reverse. The defaults (1 ms,
+     * 64 slots) suit TTLs from milliseconds to hours.
+     *
+     * @param tick      the width of the finest slot; must be at least 1 ns
+     * @param wheelSize slots per level; a power of two, at least 2
+     * @return this builder
+     */
+    public CacheBuilder<K, V> timingWheel(Duration tick, int wheelSize) {
+        this.wheelTickNanos = positiveNanos(tick, "tick");
+        if (wheelSize < 2 || Integer.bitCount(wheelSize) != 1) {
+            throw new IllegalArgumentException("wheelSize must be a power of two >= 2, got " + wheelSize);
+        }
+        this.wheelSize = wheelSize;
+        this.expiryEngineType = ExpiryEngineType.TIMING_WHEEL;
+        return this;
+    }
+
+    /**
      * Replaces the time source. Intended for tests, which pass a fake clock so
      * expiry can be checked exactly without waiting.
      *
@@ -147,7 +186,12 @@ public final class CacheBuilder<K, V> {
     public Cache<K, V> build() {
         EvictionPolicy<K, V> evictionPolicy = policy.create(maximumSize);
         ExpiryConfig expiry = new ExpiryConfig(expireAfterWriteNanos, expireAfterAccessNanos, ttlJitter);
-        return new VeloxCache<>(maximumSize, evictionPolicy, expiry, ticker, new HeapExpiryEngine<>());
+        ExpiryEngine<K, V> engine = switch (expiryEngineType) {
+            case INDEXED_HEAP -> new HeapExpiryEngine<>();
+            // The wheel counts time from its creation, so it starts at "now".
+            case TIMING_WHEEL -> new WheelExpiryEngine<>(wheelTickNanos, wheelSize, ticker.read());
+        };
+        return new VeloxCache<>(maximumSize, evictionPolicy, expiry, ticker, engine);
     }
 
     private static long positiveNanos(Duration duration, String name) {
