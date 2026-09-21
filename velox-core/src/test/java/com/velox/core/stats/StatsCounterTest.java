@@ -24,6 +24,7 @@ class StatsCounterTest {
         counter.recordEviction();
         counter.recordLoad();
         counter.recordRejection();
+        counter.recordExpiration();
 
         CacheStats stats = counter.snapshot();
         assertEquals(2, stats.hitCount());
@@ -31,6 +32,7 @@ class StatsCounterTest {
         assertEquals(1, stats.evictionCount());
         assertEquals(1, stats.loadCount());
         assertEquals(1, stats.rejectionCount());
+        assertEquals(1, stats.expirationCount());
         assertEquals(3, stats.requestCount());
     }
 
@@ -43,6 +45,7 @@ class StatsCounterTest {
         counter.recordEviction();
         counter.recordLoad();
         counter.recordRejection();
+        counter.recordExpiration();
 
         counter.reset();
 
@@ -77,8 +80,8 @@ class StatsCounterTest {
         // This is how the Tier 6 dashboard charts a LIVE hit rate: counters
         // only ever climb, so a raw snapshot describes the cache's entire
         // lifetime. Subtracting the previous snapshot gives the last second.
-        var earlier = new CacheStats(100, 20, 5, 3, 1);
-        var later = new CacheStats(150, 25, 8, 4, 1);
+        var earlier = new CacheStats(100, 20, 5, 3, 1, 7);
+        var later = new CacheStats(150, 25, 8, 4, 1, 12);
 
         CacheStats delta = later.minus(earlier);
 
@@ -87,6 +90,7 @@ class StatsCounterTest {
         assertEquals(3, delta.evictionCount());
         assertEquals(1, delta.loadCount());
         assertEquals(0, delta.rejectionCount());
+        assertEquals(5, delta.expirationCount());
     }
 
     @Test
@@ -95,8 +99,8 @@ class StatsCounterTest {
         // Snapshots can arrive out of order once several threads report
         // metrics. A negative "hits per second" on a dashboard is nonsense,
         // so we clamp instead of propagating it.
-        var later = new CacheStats(10, 10, 10, 10, 10);
-        var earlier = new CacheStats(100, 100, 100, 100, 100);
+        var later = new CacheStats(10, 10, 10, 10, 10, 10);
+        var earlier = new CacheStats(100, 100, 100, 100, 100, 100);
 
         CacheStats delta = later.minus(earlier);
 
@@ -108,7 +112,7 @@ class StatsCounterTest {
     @Test
     @DisplayName("toString reports the hit rate as a readable percentage")
     void toStringIsReadable() {
-        var stats = new CacheStats(75, 25, 10, 5, 2);
+        var stats = new CacheStats(75, 25, 10, 5, 2, 3);
 
         String text = stats.toString();
 

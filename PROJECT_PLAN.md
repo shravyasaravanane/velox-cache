@@ -81,7 +81,8 @@ Build **strictly in tier order**. Every tier ends at a demoable, committable, de
 - [x] **M1.1** `FifoPolicy`, `RandomPolicy` (O(1) swap-remove), `ClockPolicy` — all differential-tested against naive models
 - [x] **M1.2** `LfuPolicy` — true O(1) frequency-bucket list-of-lists, with aging. *Finding: on a shifting hot set, plain LFU scores 23.5% vs 64.0% aged; on a steady Zipf workload aging costs ~2 points (63.1% → 61.2%). Forgetting is a trade-off, not a free win.*
 - [x] **M1.x** `PolicyContractTest` — every `Policy` enum value must pass a shared contract (parameterised), so Tier 3 policies are held to it automatically. **129 tests total, 96.8% line / 81.6% branch.**
-- [ ] **M1.3** TTL engine A: `IndexedMinHeap` + lazy expiry on read + background sampling sweeper
+- [x] **M1.3** TTL engine A: `IndexedMinHeap` (per-node back-pointer, O(log n) cancel/reschedule) + lazy expiry on read + sweep-on-write + `cleanUp()`; expire-after-write, expire-after-access, per-entry TTL, TTL jitter; injectable `Ticker` for deterministic tests. **164 tests.** Mutation-tested: 3 injected bugs, all caught.
+  - *Scope change:* the **background sampling sweeper thread is deferred to Tier 2.** `VeloxCache` has no locking yet, so a second thread would race the caller. Until then, expired entries are removed lazily on read, opportunistically on every `put`, and on demand via `cleanUp()`. Trade-off: a cache that is neither read nor written keeps its dead entries in memory.
 - [ ] **M1.4** TTL engine B: `HierarchicalTimingWheel` (O(1) schedule/cancel), selectable via config
 - [ ] **M1.5** `Weigher<K,V>` — byte-based capacity, not just entry count
 - [ ] **M1.6** `CacheLoader` + `SingleFlight` (stampede protection) + refresh-ahead + stale-while-revalidate

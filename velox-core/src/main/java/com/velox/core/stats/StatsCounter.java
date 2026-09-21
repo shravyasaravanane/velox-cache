@@ -23,6 +23,7 @@ public final class StatsCounter {
     private long evictionCount;
     private long loadCount;
     private long rejectionCount;
+    private long expirationCount;
 
     /** Records a lookup served from cache. */
     public void recordHit() {
@@ -49,6 +50,11 @@ public final class StatsCounter {
         rejectionCount++;
     }
 
+    /** Records an entry removed because its time-to-live ran out. */
+    public void recordExpiration() {
+        expirationCount++;
+    }
+
     /** Resets every counter to zero. */
     public void reset() {
         hitCount = 0;
@@ -56,10 +62,11 @@ public final class StatsCounter {
         evictionCount = 0;
         loadCount = 0;
         rejectionCount = 0;
+        expirationCount = 0;
     }
 
     /** @return an immutable snapshot of the counters right now */
     public CacheStats snapshot() {
-        return new CacheStats(hitCount, missCount, evictionCount, loadCount, rejectionCount);
+        return new CacheStats(hitCount, missCount, evictionCount, loadCount, rejectionCount, expirationCount);
     }
 }

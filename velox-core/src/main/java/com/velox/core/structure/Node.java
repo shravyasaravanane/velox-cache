@@ -99,6 +99,46 @@ public final class Node<K, V> {
     /** Free-form pointer for a policy's own structures, e.g. the frequency bucket an LFU entry sits in. */
     Object policyData;
 
+    // ------------------------------------------------------------------
+    //  Expiry bookkeeping
+    // ------------------------------------------------------------------
+
+    /**
+     * The moment this entry expires, in {@link com.velox.core.util.Ticker}
+     * nanoseconds. Only meaningful while {@link #hasDeadline} is true.
+     *
+     * <p>Always compared by subtraction ({@code now - expiresAtNanos >= 0}),
+     * never with {@code <}, so it stays correct if the nanosecond counter wraps.
+     */
+    long expiresAtNanos;
+
+    /** Whether {@link #expiresAtNanos} holds a real deadline. */
+    boolean hasDeadline;
+
+    /**
+     * The deadline set by a write (a TTL after write, or an explicit per-entry
+     * TTL). Reading the entry never moves it.
+     *
+     * <p>Kept separately from {@link #expiresAtNanos} because expire-after-access
+     * pushes the <i>effective</i> deadline forward on every read, but must never
+     * push it past this hard limit. The effective deadline is the earlier of the two.
+     */
+    long hardDeadlineNanos;
+
+    /** Whether {@link #hardDeadlineNanos} holds a real deadline. */
+    boolean hasHardDeadline;
+
+    /**
+     * This node's index in the expiry heap, or -1 if it is not in it.
+     *
+     * <p>This back-pointer is what turns a plain heap into an <i>indexed</i>
+     * one. When a read pushes the deadline forward, or the entry is evicted,
+     * we must find it inside the heap. Without an index that is an O(n) scan;
+     * with it, we jump straight to position {@code heapIndex}: O(1) to find,
+     * O(log n) to repair.
+     */
+    int heapIndex = -1;
+
     /**
      * Creates a data-carrying node.
      *
@@ -187,6 +227,53 @@ public final class Node<K, V> {
     /** @param policyData the owning policy's private data for this node */
     public void setPolicyData(Object policyData) {
         this.policyData = policyData;
+    }
+
+    /** @return whether this entry currently has an expiry deadline */
+    public boolean hasDeadline() {
+        return hasDeadline;
+    }
+
+    /** @return the effective deadline in ticker nanoseconds; meaningful only if {@link #hasDeadline()} */
+    public long expiresAtNanos() {
+        return expiresAtNanos;
+    }
+
+    /** Sets the effective deadline. Does NOT reposition the node in an expiry structure. */
+    public void setExpiresAtNanos(long deadline) {
+        this.expiresAtNanos = deadline;
+        this.hasDeadline = true;
+    }
+
+    /** Removes the effective deadline: the entry no longer expires. */
+    public void clearDeadline() {
+        this.hasDeadline = false;
+    }
+
+    /** @return whether a write-based hard deadline is set */
+    public boolean hasHardDeadline() {
+        return hasHardDeadline;
+    }
+
+    /** @return the write-based hard deadline; meaningful only if {@link #hasHardDeadline()} */
+    public long hardDeadlineNanos() {
+        return hardDeadlineNanos;
+    }
+
+    /** Sets the write-based hard deadline that reads can never extend. */
+    public void setHardDeadlineNanos(long deadline) {
+        this.hardDeadlineNanos = deadline;
+        this.hasHardDeadline = true;
+    }
+
+    /** Removes the write-based hard deadline. */
+    public void clearHardDeadline() {
+        this.hasHardDeadline = false;
+    }
+
+    /** @return this node's index in the expiry heap, or -1 if it is not scheduled there */
+    public int heapIndex() {
+        return heapIndex;
     }
 
     /**

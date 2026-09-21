@@ -77,6 +77,34 @@ public interface Cache<K, V> {
     void put(K key, V value);
 
     /**
+     * Stores {@code value} with its own time-to-live, overriding any
+     * configured expire-after-write for this entry.
+     *
+     * <p>The deadline is a <b>hard</b> limit: reads can never extend it, even
+     * when expire-after-access is configured. A later plain {@link #put(Object,
+     * Object)} of the same key replaces it with the cache's configured TTL.
+     *
+     * @param key   the key
+     * @param value the value
+     * @param ttl   how long the entry may live; must be positive
+     * @throws IllegalArgumentException if {@code ttl} is zero or negative
+     * @implNote O(log n) with the heap expiry engine
+     */
+    void put(K key, V value, java.time.Duration ttl);
+
+    /**
+     * Removes every entry whose time-to-live has run out.
+     *
+     * <p>Expired entries are removed on their own in three ways: lazily when
+     * read, opportunistically whenever a {@code put} runs, and here on demand.
+     * Call this when you want {@link #size()} to be exact, or to release memory
+     * held by expired entries on a cache that is not being written to.
+     *
+     * @implNote O(k log n) for k expired entries with the heap engine
+     */
+    void cleanUp();
+
+    /**
      * Removes the entry for {@code key}, if present.
      *
      * @param key the key to drop
@@ -99,8 +127,11 @@ public interface Cache<K, V> {
     boolean containsKey(K key);
 
     /**
-     * @return the number of cached entries
-     * @implNote O(1)
+     * @return the number of entries held, <b>including entries that have
+     *         expired but not yet been removed</b>; call {@link #cleanUp()}
+     *         first for an exact count
+     * @implNote O(1). Deliberately not exact: making it exact would mean
+     *           sweeping the expiry structure on every call.
      */
     int size();
 
