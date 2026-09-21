@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  velox-core — THE CACHE ENGINE
+
+  This is the heart of the project: every data structure and algorithm.
+
+  RULE: this module has ZERO runtime dependencies. Nothing but the Java
+  standard library. We write the hash map, the linked list, the heap and
+  the sketches ourselves — that is the whole point of a DSA capstone.
+
+  JUnit appears below with <scope>test</scope>, which means it is used
+  ONLY when running tests and is never shipped with the library.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- Inherit everything (Java version, plugin config) from the parent. -->
+    <parent>
+        <groupId>com.velox</groupId>
+        <artifactId>velox-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>velox-core</artifactId>
+    <name>VeloxCache :: Core Engine</name>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

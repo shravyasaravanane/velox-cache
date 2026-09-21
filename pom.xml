@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  VeloxCache — PARENT POM
+
+  A "pom" (Project Object Model) is Maven's description of a project.
+  This one is the PARENT: it doesn't contain code itself, it holds the
+  settings that every module inherits, so we configure things once.
+
+  <packaging>pom</packaging> is what marks it as a parent/aggregator.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- These three lines are this project's unique address ("coordinates"). -->
+    <groupId>com.velox</groupId>
+    <artifactId>velox-parent</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <name>VeloxCache</name>
+    <description>A pluggable, observable, distributed caching engine built from scratch.</description>
+
+    <!-- The sub-projects. We add more here as we reach later tiers. -->
+    <modules>
+        <module>velox-core</module>
+    </modules>
+
+    <properties>
+        <!-- Compile against Java 21 and read source files as UTF-8. -->
+        <maven.compiler.release>21</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <!-- Library versions in one place, so upgrades are a one-line change. -->
+        <junit.version>5.11.4</junit.version>
+        <surefire.version>3.5.2</surefire.version>
+        <jacoco.version>0.8.12</jacoco.version>
+    </properties>
+
+    <!--
+      dependencyManagement declares versions WITHOUT adding the dependency.
+      Modules then ask for the library by name only, and inherit the version.
+    -->
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.junit</groupId>
+                <artifactId>junit-bom</artifactId>
+                <version>${junit.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <!-- Surefire is the plugin that actually runs our tests. -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>${surefire.version}</version>
+                    <configuration>
+                        <!--
+                          Turns ON our internal consistency checks during tests.
+                          Every data structure we write will have an
+                          assertInvariants() method that verifies it is not
+                          corrupted. We want those running on every test, but
+                          switched off in production where they'd cost speed.
+                        -->
+                        <systemPropertyVariables>
+                            <velox.assertions>true</velox.assertions>
+                        </systemPropertyVariables>
+                    </configuration>
+                </plugin>
+
+                <!-- JaCoCo measures how much of our code the tests actually execute. -->
+                <plugin>
+                    <groupId>org.jacoco</groupId>
+                    <artifactId>jacoco-maven-plugin</artifactId>
+                    <version>${jacoco.version}</version>
+                    <executions>
+                        <execution>
+                            <goals><goal>prepare-agent</goal></goals>
+                        </execution>
+                        <execution>
+                            <id>report</id>
+                            <phase>test</phase>
+                            <goals><goal>report</goal></goals>
+                        </execution>
+                    </executions>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
+
+</project>

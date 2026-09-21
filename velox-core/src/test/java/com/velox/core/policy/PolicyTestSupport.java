@@ -1,0 +1,337 @@
+package com.velox.core.policy;
+
+import com.velox.core.VeloxCache;
+import com.velox.core.stats.CacheStats;
+
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.function.IntFunction;
+import java.util.function.Supplier;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+/**
+ * Shared machinery for testing eviction policies by <b>differential testing</b>.
+ *
+ * <h2>The technique</h2>
+ *
+ * For each policy we write a second implementation that is deliberately
+ * stupid: plain lists, linear scans, no cleverness, obviously correct by
+ * inspection. Then we drive the real cache and the naive one with the same
+ * random operations and demand they agree on <i>every</i> answer and on
+ * <i>exactly which keys survive</i>.
+ *
+ * <p>The real policies are all O(1) with pointer surgery, so their bugs are
+ * subtle: a mis-linked node, a bucket left behind, a stale index. Hand-written
+ * test cases only catch the situations someone thought of. Random operations
+ * against a trivially-correct model explore the ones nobody did.
+ *
+ * <p>Note what a naive model is <i>not</i>: it is not a second copy of the
+ * same algorithm. It uses different data structures (an ArrayList and a
+ * scan, rather than a bucket chain), so a mistake in the clever version is
+ * very unlikely to be repeated in the simple one.
+ */
+final class PolicyTestSupport {
+
+    private PolicyTestSupport() {
+    }
+
+    // ------------------------------------------------------------------
+    //  The naive reference cache
+    // ------------------------------------------------------------------
+
+    /** The policy-specific part of a reference cache: who should be evicted. */
+    interface NaiveModel {
+        void onInsert(String key);
+
+        void onAccess(String key);
+
+        void onMiss(String key);
+
+        void onRemove(String key);
+
+        /** @return the key to evict; called only when the cache is full and non-empty */
+        String victim();
+    }
+
+    /** A bounded map that delegates its eviction decision to a {@link NaiveModel}. */
+    static final class NaiveCache {
+        private final int capacity;
+        private final Map<String, Integer> data = new HashMap<>();
+        private final NaiveModel model;
+
+        NaiveCache(int capacity, NaiveModel model) {
+            this.capacity = capacity;
+            this.model = model;
+        }
+
+        Integer get(String key) {
+            Integer value = data.get(key);
+            if (value != null) {
+                model.onAccess(key);
+            } else {
+                model.onMiss(key);
+            }
+            return value;
+        }
+
+        void put(String key, int value) {
+            if (data.containsKey(key)) {
+                data.put(key, value);
+                model.onAccess(key);
+                return;
+            }
+            if (data.size() >= capacity) {
+                String victim = model.victim();
+                data.remove(victim);
+                model.onRemove(victim);
+            }
+            data.put(key, value);
+            model.onInsert(key);
+        }
+
+        void invalidate(String key) {
+            if (data.remove(key) != null) {
+                model.onRemove(key);
+            }
+        }
+
+        int size() {
+            return data.size();
+        }
+
+        Set<String> keys() {
+            return new TreeSet<>(data.keySet());
+        }
+    }
+
+    // ------------------------------------------------------------------
+    //  Naive models
+    // ------------------------------------------------------------------
+
+    /** FIFO as an ArrayList in insertion order; the victim is the first element. */
+    static final class NaiveFifo implements NaiveModel {
+        private final List<String> order = new ArrayList<>();
+
+        @Override
+        public void onInsert(String key) {
+            order.add(key);
+        }
+
+        @Override
+        public void onAccess(String key) {
+        }
+
+        @Override
+        public void onMiss(String key) {
+        }
+
+        @Override
+        public void onRemove(String key) {
+            order.remove(key);
+        }
+
+        @Override
+        public String victim() {
+            return order.get(0);
+        }
+    }
+
+    /**
+     * CLOCK as an ArrayList used as a ring, index 0 newest, last index the
+     * "hand". Sweeping past a referenced entry rotates it to the front.
+     */
+    static final class NaiveClock implements NaiveModel {
+        private final List<String> ring = new ArrayList<>();
+        private final Set<String> referenced = new HashSet<>();
+
+        @Override
+        public void onInsert(String key) {
+            ring.add(0, key);
+        }
+
+        @Override
+        public void onAccess(String key) {
+            referenced.add(key);
+        }
+
+        @Override
+        public void onMiss(String key) {
+        }
+
+        @Override
+        public void onRemove(String key) {
+            ring.remove(key);
+            referenced.remove(key);
+        }
+
+        @Override
+        public String victim() {
+            while (referenced.contains(ring.get(ring.size() - 1))) {
+                String passed = ring.remove(ring.size() - 1);
+                referenced.remove(passed);
+                ring.add(0, passed);
+            }
+            return ring.get(ring.size() - 1);
+        }
+    }
+
+    /**
+     * LFU by brute force: every entry carries (frequency, lastUsedTick) and
+     * the victim is found by scanning for the minimum. O(n), and correct by
+     * inspection. Aging is modelled by explicitly sorting and re-ranking.
+     */
+    static final class NaiveLfu implements NaiveModel {
+        private static final class Meta {
+            int frequency;
+            long lastUsed;
+        }
+
+        private final Map<String, Meta> meta = new HashMap<>();
+        private final long agingPeriod;
+        private long requests;
+        private long tick;
+
+        NaiveLfu(long agingPeriod) {
+            this.agingPeriod = agingPeriod;
+        }
+
+        @Override
+        public void onInsert(String key) {
+            Meta m = new Meta();
+            m.frequency = 1;
+            m.lastUsed = ++tick;
+            meta.put(key, m);
+        }
+
+        @Override
+        public void onAccess(String key) {
+            Meta m = meta.get(key);
+            m.frequency++;
+            m.lastUsed = ++tick;
+            countRequest();
+        }
+
+        @Override
+        public void onMiss(String key) {
+            countRequest();
+        }
+
+        @Override
+        public void onRemove(String key) {
+            meta.remove(key);
+        }
+
+        @Override
+        public String victim() {
+            String best = null;
+            Meta bestMeta = null;
+            for (Map.Entry<String, Meta> e : meta.entrySet()) {
+                Meta m = e.getValue();
+                if (bestMeta == null
+                        || m.frequency < bestMeta.frequency
+                        || (m.frequency == bestMeta.frequency && m.lastUsed < bestMeta.lastUsed)) {
+                    best = e.getKey();
+                    bestMeta = m;
+                }
+            }
+            return best;
+        }
+
+        private void countRequest() {
+            if (agingPeriod > 0 && ++requests >= agingPeriod) {
+                requests = 0;
+                age();
+            }
+        }
+
+        private void age() {
+            // Rank by (old frequency, recency) BEFORE halving, then halve and
+            // overwrite recency with the rank. Ties created by merging buckets
+            // are then broken by old frequency first, then recency -- the
+            // order the real policy's bucket rebuild produces.
+            List<Meta> ordered = new ArrayList<>(meta.values());
+            ordered.sort(Comparator.<Meta>comparingInt(m -> m.frequency).thenComparingLong(m -> m.lastUsed));
+            long rank = 0;
+            for (Meta m : ordered) {
+                m.frequency = Math.max(1, m.frequency >> 1);
+                m.lastUsed = rank++;
+            }
+            tick = ordered.size();
+        }
+    }
+
+    // ------------------------------------------------------------------
+    //  The differential driver
+    // ------------------------------------------------------------------
+
+    /**
+     * Runs the real cache and a naive reference on identical random operations
+     * and fails at the first disagreement.
+     *
+     * @return the real cache's final statistics, for reporting
+     */
+    static CacheStats runDifferential(
+            String label,
+            IntFunction<EvictionPolicy<String, Integer>> policyFactory,
+            Supplier<NaiveModel> naiveModel,
+            int capacity,
+            int keySpace,
+            int operations,
+            long seed) {
+
+        var real = new VeloxCache<String, Integer>(capacity, policyFactory.apply(capacity));
+        var naive = new NaiveCache(capacity, naiveModel.get());
+        var random = new Random(seed);
+
+        for (int step = 0; step < operations; step++) {
+            // Skewed keys: low indexes are far more popular. That is what makes
+            // frequencies diverge, which is what LFU-style logic needs to be tested.
+            String key = "k" + (int) (keySpace * Math.pow(random.nextDouble(), 2.0));
+            int action = random.nextInt(10);
+
+            if (action < 6) {
+                assertEquals(naive.get(key), real.getIfPresent(key),
+                        label + ": step " + step + " disagreed on get(" + key + ")");
+            } else if (action < 9) {
+                int value = random.nextInt(1_000_000);
+                naive.put(key, value);
+                real.put(key, value);
+            } else {
+                naive.invalidate(key);
+                real.invalidate(key);
+            }
+
+            assertEquals(naive.size(), real.size(), label + ": size diverged at step " + step);
+
+            if (step % 250 == 0) {
+                assertEquals(naive.keys(), liveKeys(real, keySpace),
+                        label + ": surviving keys diverged at step " + step);
+                real.assertInvariants();
+            }
+        }
+
+        real.assertInvariants();
+        assertEquals(naive.keys(), liveKeys(real, keySpace), label + ": final surviving keys diverged");
+        return real.stats();
+    }
+
+    /** Lists the keys the cache holds, using containsKey so recency is not disturbed. */
+    static Set<String> liveKeys(VeloxCache<String, Integer> cache, int keySpace) {
+        var present = new TreeSet<String>();
+        for (int i = 0; i < keySpace; i++) {
+            String key = "k" + i;
+            if (cache.containsKey(key)) {
+                present.add(key);
+            }
+        }
+        return present;
+    }
+}
