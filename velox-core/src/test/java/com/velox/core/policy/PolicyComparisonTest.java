@@ -24,7 +24,7 @@ class PolicyComparisonTest {
 
     private static final Policy[] POLICIES = {
             Policy.LRU, Policy.FIFO, Policy.RANDOM, Policy.CLOCK, Policy.LFU, Policy.LFU_AGED, Policy.SLRU,
-            Policy.TWO_Q, Policy.LRU_K
+            Policy.TWO_Q, Policy.LRU_K, Policy.ARC
     };
 
     // ------------------------------------------------------------------

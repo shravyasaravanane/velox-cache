@@ -466,6 +466,100 @@ final class PolicyTestSupport {
         }
     }
 
+    /**
+     * ARC as four plain lists, matching the same simplification {@link ArcPolicy} documents
+     * (every eviction ghosts its victim; each ghost list is independently capped at
+     * capacity, rather than the source paper's compound T1+B1/T2+B2 bounds).
+     */
+    static final class NaiveArc implements NaiveModel {
+        private final List<String> t1 = new ArrayList<>();
+        private final List<String> t2 = new ArrayList<>();
+        private final List<String> b1 = new ArrayList<>();
+        private final List<String> b2 = new ArrayList<>();
+        private final int capacity;
+        private double p;
+        private int pendingArrival;      // 0 = fresh, 1 = from B1, 2 = from B2
+
+        NaiveArc(int capacity) {
+            this.capacity = capacity;
+        }
+
+        @Override
+        public void beforeInsert(String key) {
+            if (b1.contains(key)) {
+                p = Math.min(capacity, p + Math.max(1.0, (double) b2.size() / Math.max(1, b1.size())));
+                b1.remove(key);
+                pendingArrival = 1;
+                return;
+            }
+            if (b2.contains(key)) {
+                p = Math.max(0.0, p - Math.max(1.0, (double) b1.size() / Math.max(1, b2.size())));
+                b2.remove(key);
+                pendingArrival = 2;
+                return;
+            }
+            pendingArrival = 0;
+        }
+
+        @Override
+        public void onInsert(String key) {
+            if (pendingArrival == 0) {
+                t1.add(0, key);
+            } else {
+                t2.add(0, key);
+            }
+            pendingArrival = 0;
+        }
+
+        @Override
+        public void onAccess(String key) {
+            if (t1.remove(key)) {
+                t2.add(0, key);
+            } else {
+                t2.remove(key);
+                t2.add(0, key);
+            }
+        }
+
+        @Override
+        public void onMiss(String key) {
+        }
+
+        @Override
+        public void onEvict(String key) {
+            if (t1.contains(key)) {
+                b1.add(0, key);
+            } else {
+                b2.add(0, key);
+            }
+            while (b1.size() > capacity) {
+                b1.remove(b1.size() - 1);
+            }
+            while (b2.size() > capacity) {
+                b2.remove(b2.size() - 1);
+            }
+        }
+
+        @Override
+        public void onRemove(String key) {
+            if (!t1.remove(key)) {
+                t2.remove(key);
+            }
+        }
+
+        @Override
+        public String victim() {
+            boolean evictFromT1 = !t1.isEmpty() && (pendingArrival == 2 ? t1.size() >= p : t1.size() > p);
+            if (evictFromT1) {
+                return t1.get(t1.size() - 1);
+            }
+            if (!t2.isEmpty()) {
+                return t2.get(t2.size() - 1);
+            }
+            return t1.get(t1.size() - 1);
+        }
+    }
+
     // ------------------------------------------------------------------
     //  The differential driver
     // ------------------------------------------------------------------

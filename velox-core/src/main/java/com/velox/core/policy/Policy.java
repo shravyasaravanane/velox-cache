@@ -79,7 +79,14 @@ public enum Policy {
      * reference, not its first. Until then it is more evictable than anything that has
      * ever reached two references, however long ago. See {@link LruKPolicy}.
      */
-    LRU_K("LRU-2", capacity -> new LruKPolicy<>(2));
+    LRU_K("LRU-2", capacity -> new LruKPolicy<>(2)),
+
+    /**
+     * Adaptive Replacement Cache: like {@link #TWO_Q}, but the split between the recency
+     * and frequency sides is not a fixed fraction -- it is tuned continuously from the
+     * cache's own ghost-list hit rate. See {@link ArcPolicy}.
+     */
+    ARC("ARC", capacity -> new ArcPolicy<>(capacity));
 
     private final String displayName;
     private final IntFunction<EvictionPolicy<?, ?>> factory;
