@@ -2,6 +2,7 @@ package com.velox.server.cache;
 
 import com.velox.core.Cache;
 import com.velox.core.CacheBuilder;
+import com.velox.core.ShardedCache;
 import com.velox.core.policy.Policy;
 import com.velox.core.stats.CacheStats;
 
@@ -82,6 +83,17 @@ public final class HotSwappableCache<K, V> implements Cache<K, V> {
 
     public int currentCapacity() {
         return capacity;
+    }
+
+    /**
+     * @return the current entry count of each shard, in shard order, for the live dashboard's
+     *         per-shard load panel; empty if the current delegate is not a {@link ShardedCache}
+     *         (it always is in this application, since {@link CacheConfig} always passes a
+     *         {@code concurrencyLevel} -- see that class' Javadoc for why)
+     */
+    public int[] shardSizes() {
+        Cache<K, V> current = delegate.get();
+        return current instanceof ShardedCache<K, V> sharded ? sharded.shardSizes() : new int[0];
     }
 
     // ------------------------------------------------------------------

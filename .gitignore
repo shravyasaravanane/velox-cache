@@ -33,3 +33,6 @@ velox-server/data/
 
 # ...except benchmark result data, which is small and is the evidence behind the reports
 !docs/benchmarks/data/*.csv
+
+# Ad-hoc logs from manually running the server or the dashboard dev server locally
+*.log

@@ -4,6 +4,7 @@ import com.velox.server.cache.CacheVariants;
 import com.velox.server.cache.ProductCacheService;
 import com.velox.server.cache.ProductUpdate;
 import com.velox.server.domain.ProductDetails;
+import com.velox.server.livestats.LatencyRingBuffer;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -23,10 +24,13 @@ public class ProductController {
 
     private final ProductCacheService productCacheService;
     private final CacheVariants cacheVariants;
+    private final LatencyRingBuffer latencyRingBuffer;
 
-    public ProductController(ProductCacheService productCacheService, CacheVariants cacheVariants) {
+    public ProductController(ProductCacheService productCacheService, CacheVariants cacheVariants,
+            LatencyRingBuffer latencyRingBuffer) {
         this.productCacheService = productCacheService;
         this.cacheVariants = cacheVariants;
+        this.latencyRingBuffer = latencyRingBuffer;
     }
 
     /**
@@ -37,14 +41,23 @@ public class ProductController {
      * {@code w_tiny_lfu} by default) -- the A/B toggle: point a live load generator at the same
      * id range under each value and compare {@code GET /api/stats}' per-variant hit rate and
      * latency afterward.
+     *
+     * <p>Only the default (primary-cache) path feeds {@link LatencyRingBuffer}, which drives the
+     * live dashboard's latency percentile bars -- the dashboard watches the one cache the admin
+     * hot-swap endpoints actually control, not the disposable A/B comparison caches.
      */
     @GetMapping("/api/products/{id}")
     public ResponseEntity<?> getProduct(@PathVariable long id,
             @RequestParam(required = false) String cache) {
         if (cache == null) {
-            return productCacheService.getCacheAside(id)
-                    .map(ResponseEntity::ok)
-                    .orElseGet(() -> ResponseEntity.notFound().build());
+            long start = System.nanoTime();
+            try {
+                return productCacheService.getCacheAside(id)
+                        .map(ResponseEntity::ok)
+                        .orElseGet(() -> ResponseEntity.notFound().build());
+            } finally {
+                latencyRingBuffer.record(System.nanoTime() - start);
+            }
         }
         try {
             return cacheVariants.get(cache, id)

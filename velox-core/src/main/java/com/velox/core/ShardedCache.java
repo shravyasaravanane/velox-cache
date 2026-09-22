@@ -501,6 +501,26 @@ public final class ShardedCache<K, V> implements Cache<K, V> {
         return shards.length;
     }
 
+    /**
+     * @return the current entry count of each shard, in shard order -- how evenly (or not)
+     *         {@link ShardRouter} is spreading keys across shards, and the basis for a live
+     *         "per-shard load" panel. A snapshot, not atomic across shards: like {@link #size()},
+     *         it is a sum (here, per-shard) of values that can each keep moving while this loops.
+     */
+    public int[] shardSizes() {
+        int[] sizes = new int[shards.length];
+        for (int i = 0; i < shards.length; i++) {
+            Shard<K, V> shard = shards[i];
+            shard.readLock.lock();
+            try {
+                sizes[i] = shard.engine.size();
+            } finally {
+                shard.readLock.unlock();
+            }
+        }
+        return sizes;
+    }
+
     /** @return how many read records were discarded because a buffer was full or contended */
     public long droppedReads() {
         long total = 0;

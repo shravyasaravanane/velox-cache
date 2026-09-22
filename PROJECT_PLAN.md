@@ -159,13 +159,14 @@ Build **strictly in tier order**. Every tier ends at a demoable, committable, de
 <details>
 <summary><b>Tier 6 — Live Dashboard</b></summary>
 
-- [ ] **M6.1** SSE event stream, throttled to 10 Hz, bounded server-side ring buffer
-- [ ] **M6.2** Screen 1 — Live Ops (ops/s, hit ratio, latency percentiles, fill bar, per-shard load)
+- [x] **M6.1** `LiveStatsBroadcaster`: SSE stream at `GET /api/stats/stream`, `@Scheduled(fixedRate=100)` (10 Hz), one `LiveStatsFrame` per tick to every connected client, computed as a per-second rate from the delta against the previous tick (not a raw counter dump). `LatencyRingBuffer` (lock-free, `AtomicLongArray`, honestly-disclosed benign race under extreme concurrency) supplies p50/p90/p99/p999 from the last ~2,048 primary-path requests. `ShardedCache.shardSizes()` added to velox-core for the per-shard load panel.
+- [x] **M6.2** `velox-dashboard`: React 19 + Vite 8 + TypeScript + Recharts + Tailwind v4, Screen 1 — Live Ops. Ops/sec, hit-rate sparkline with ops/sec overlay (last 30s), latency percentile bars, capacity fill bar, per-shard load chart, connection status. Verified end-to-end against a live server: TypeScript build is clean, and `curl` against the Vite dev server confirms real, correctly-shaped `LiveStatsFrame` JSON flowing through the proxy at 10 Hz under real load-generator traffic. **Not visually confirmed in a browser by the assistant** (no browser tool available) — open `http://localhost:5173` yourself to see it rendered.
 - [ ] **M6.3** Screen 2 — **Internals Visualizer** (animated DLL / LFU buckets / ARC lanes / W-TinyLFU regions) with step mode
 - [ ] **M6.4** Screen 3 — **Policy Arena** (shadow caches racing on live traffic)
 - [ ] **M6.5** Screen 4 — Heat map + top-K hot keys + HLL cardinality
 - [ ] **M6.6** Screen 6 — Benchmark Explorer (loads the Tier-4 CSVs)
 - [ ] **M6.7** Screen 7 — **Chaos Panel** (stampede, scan flood, avalanche, penetration, kill node)
+- [ ] *(By your own choice, scope was narrowed to M6.1/M6.2 for now — see the conversation. M6.3-M6.7 remain, and the Tier 6 checkpoint below is deferred until you decide whether to continue.)*
 - [ ] ✅ **Checkpoint:** the 3-minute demo video
 </details>
 

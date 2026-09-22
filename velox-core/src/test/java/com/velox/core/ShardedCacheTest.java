@@ -94,6 +94,24 @@ class ShardedCacheTest {
     }
 
     @Test
+    @DisplayName("shardSizes sums to size() and has one entry per shard")
+    void shardSizesSumToTheWhole() {
+        var cache = sharded(1000, 8, true);
+        for (int i = 0; i < 300; i++) {
+            cache.put("k" + i, i);
+        }
+
+        int[] sizes = cache.shardSizes();
+
+        assertEquals(8, sizes.length);
+        int total = 0;
+        for (int size : sizes) {
+            total += size;
+        }
+        assertEquals(cache.size(), total);
+    }
+
+    @Test
     @DisplayName("the whole capacity is usable and never exceeded")
     void capacityIsSharedExactly() {
         var cache = sharded(100, 4, true);
