@@ -59,6 +59,14 @@ final class PolicyTestSupport {
 
         /** @return the key to evict; called only when the cache is full and non-empty */
         String victim();
+
+        /** A new key is about to be stored (before room is made for it). */
+        default void beforeInsert(String key) {
+        }
+
+        /** {@code key} is being evicted for lack of room; {@link #onRemove} follows. */
+        default void onEvict(String key) {
+        }
     }
 
     /** A bounded map that delegates its eviction decision to a {@link NaiveModel}. */
@@ -88,8 +96,10 @@ final class PolicyTestSupport {
                 model.onAccess(key);
                 return;
             }
+            model.beforeInsert(key);
             if (data.size() >= capacity) {
                 String victim = model.victim();
+                model.onEvict(victim);
                 data.remove(victim);
                 model.onRemove(victim);
             }
@@ -265,6 +275,133 @@ final class PolicyTestSupport {
                 m.lastUsed = rank++;
             }
             tick = ordered.size();
+        }
+    }
+
+    /**
+     * SLRU as two plain lists (index 0 = most recently used). Matches the real policy's
+     * default 80% protected fraction.
+     */
+    static final class NaiveSlru implements NaiveModel {
+        private final List<String> probation = new ArrayList<>();
+        private final List<String> protectedList = new ArrayList<>();
+        private final int protectedCapacity;
+
+        NaiveSlru(int capacity) {
+            this.protectedCapacity = (int) (capacity * 0.8);
+        }
+
+        @Override
+        public void onInsert(String key) {
+            probation.add(0, key);
+        }
+
+        @Override
+        public void onAccess(String key) {
+            if (protectedList.remove(key)) {
+                protectedList.add(0, key);
+                return;
+            }
+            probation.remove(key);
+            protectedList.add(0, key);
+            if (protectedList.size() > protectedCapacity) {
+                String demoted = protectedList.remove(protectedList.size() - 1);
+                probation.add(0, demoted);
+            }
+        }
+
+        @Override
+        public void onMiss(String key) {
+        }
+
+        @Override
+        public void onRemove(String key) {
+            if (!probation.remove(key)) {
+                protectedList.remove(key);
+            }
+        }
+
+        @Override
+        public String victim() {
+            if (!probation.isEmpty()) {
+                return probation.get(probation.size() - 1);
+            }
+            return protectedList.get(protectedList.size() - 1);
+        }
+    }
+
+    /**
+     * 2Q as three plain lists: A1in (FIFO, index 0 = newest), a ghost list of evicted
+     * A1in keys (index 0 = newest ghost), and Am (index 0 = most recently used).
+     */
+    static final class NaiveTwoQueue implements NaiveModel {
+        private final List<String> a1in = new ArrayList<>();
+        private final List<String> main = new ArrayList<>();
+        private final List<String> ghosts = new ArrayList<>();
+        private final int a1InTarget;
+        private final int a1OutTarget;
+        private String pendingGhostHit;
+
+        NaiveTwoQueue(int capacity) {
+            this.a1InTarget = Math.max(1, (int) (capacity * 0.25));
+            this.a1OutTarget = (int) (capacity * 0.5);
+        }
+
+        @Override
+        public void beforeInsert(String key) {
+            if (ghosts.remove(key)) {
+                pendingGhostHit = key;
+            }
+        }
+
+        @Override
+        public void onInsert(String key) {
+            if (key.equals(pendingGhostHit)) {
+                main.add(0, key);
+            } else {
+                a1in.add(0, key);
+            }
+            pendingGhostHit = null;
+        }
+
+        @Override
+        public void onAccess(String key) {
+            if (main.remove(key)) {
+                main.add(0, key);
+            }
+            // A hit while still in A1in is deliberately left exactly where it is.
+        }
+
+        @Override
+        public void onMiss(String key) {
+        }
+
+        @Override
+        public void onEvict(String key) {
+            if (a1in.contains(key)) {
+                ghosts.add(0, key);
+                while (ghosts.size() > a1OutTarget) {
+                    ghosts.remove(ghosts.size() - 1);
+                }
+            }
+        }
+
+        @Override
+        public void onRemove(String key) {
+            if (!a1in.remove(key)) {
+                main.remove(key);
+            }
+        }
+
+        @Override
+        public String victim() {
+            if (a1in.size() > a1InTarget && !a1in.isEmpty()) {
+                return a1in.get(a1in.size() - 1);
+            }
+            if (!main.isEmpty()) {
+                return main.get(main.size() - 1);
+            }
+            return a1in.get(a1in.size() - 1);
         }
     }
 

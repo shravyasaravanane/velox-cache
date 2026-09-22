@@ -57,7 +57,22 @@ public enum Policy {
      * LFU that halves every count once per ~10x capacity requests, letting a
      * formerly hot key be overtaken when the workload shifts.
      */
-    LFU_AGED("LFU-AGED", capacity -> new LfuPolicy<>(10L * capacity));
+    LFU_AGED("LFU-AGED", capacity -> new LfuPolicy<>(10L * capacity)),
+
+    /**
+     * Segmented LRU: two LRU lists, probation and protected. A second use promotes an
+     * entry out of probation, so a long scan of one-hit keys can only cycle through
+     * probation and never reaches (or evicts) anything used more than once.
+     */
+    SLRU("SLRU", capacity -> new SlruPolicy<>(capacity)),
+
+    /**
+     * 2Q (Johnson &amp; Shasha): A1in (FIFO), A1out (a ghost list of recent A1in
+     * evictions) and Am (LRU). Stricter than {@link #SLRU}: a hit while still in A1in
+     * does nothing, so promotion to Am requires surviving an eviction and being asked
+     * for again, not merely a second touch in quick succession.
+     */
+    TWO_Q("2Q", capacity -> new TwoQueuePolicy<>(capacity));
 
     private final String displayName;
     private final IntFunction<EvictionPolicy<?, ?>> factory;

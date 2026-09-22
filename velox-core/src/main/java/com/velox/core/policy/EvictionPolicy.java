@@ -92,7 +92,9 @@ public interface EvictionPolicy<K, V> {
 
     /**
      * Chooses the entry to discard next. Does <b>not</b> remove it — the
-     * cache calls {@link #onRemove} for that.
+     * cache calls {@link #onRemove} for that. It <i>may</i> reorganise the policy's
+     * own lists (CLOCK clears reference bits as its hand sweeps; W-TinyLFU moves the
+     * duel's winner into the main region).
      *
      * @return the most expendable entry, or {@code null} if nothing is tracked
      * @implSpec O(1)
@@ -114,6 +116,41 @@ public interface EvictionPolicy<K, V> {
      */
     default boolean admit(Node<K, V> candidate, Node<K, V> victim) {
         return true;
+    }
+
+    /**
+     * A NEW key is about to be inserted, before the cache makes room for it.
+     *
+     * <p>This is the hook for policies whose choice of victim depends on <i>who is
+     * arriving</i>. ARC is the example: when the arriving key is one it recently
+     * evicted, that is evidence its balance between "recent" and "frequent" entries was
+     * wrong, and it retunes itself <i>before</i> choosing whom to evict. Called whether
+     * or not a {@link #onMiss} preceded it, so it must tolerate seeing the same key
+     * twice (a cache-aside caller misses, then stores). Not called for a value too
+     * large to ever fit.
+     *
+     * @param key the key that is about to be stored
+     * @implSpec O(1)
+     */
+    default void beforeInsert(K key) {
+        // Most policies do not care who is arriving.
+    }
+
+    /**
+     * {@code victim} is about to be removed <b>to make room</b>, and {@link #onRemove}
+     * will follow immediately.
+     *
+     * <p>{@code onRemove} cannot tell a capacity eviction from an invalidation or an
+     * expiry, and the difference matters to policies with ghost lists: only an entry
+     * that was evicted because there was no room is worth remembering. Being pushed
+     * out is evidence about the policy; being deleted by the application is not.
+     *
+     * @param victim the entry chosen by {@link #selectVictim()} and not refused by
+     *               {@link #admit}
+     * @implSpec O(1)
+     */
+    default void onEvict(Node<K, V> victim) {
+        // Only ghost-list policies remember who was evicted.
     }
 
     /**

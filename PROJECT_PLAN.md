@@ -122,8 +122,8 @@ Build **strictly in tier order**. Every tier ends at a demoable, committable, de
 <details>
 <summary><b>Tier 3 — Smart Policies</b></summary>
 
-- [ ] **M3.1** `SlruPolicy` (probation 20% / protected 80%)
-- [ ] **M3.2** `TwoQueuePolicy` (A1in / A1out ghost / Am)
+- [x] **M3.1** `SlruPolicy` (probation 20% / protected 80% by default, either configurable): a scan of one-hit keys can only cycle through probation, so it never touches an entry proven by a second use. Two new `EvictionPolicy` hooks added for this tier, `beforeInsert(key)` (the arriving key, before room is made) and `onEvict(victim)` (fires only for a capacity eviction, never an explicit invalidate or an expiry — needed so ghost-list policies remember the right thing). Differential-tested against a naive two-list model; contract-tested automatically via the `Policy` enum.
+- [x] **M3.2** `TwoQueuePolicy` (A1in FIFO / A1out ghost list / Am LRU), plus a new `GhostList` component (an `OpenAddressingMap` + `IntrusiveLinkedList` pair, key-only, O(1) remember/forget/age-out) shared by every ghost-list policy still to come (ARC). Stricter than SLRU: a hit while still in A1in does nothing at all; promotion to Am requires surviving an eviction to A1out and being asked for again. Am's own evictions do not mint ghosts — only A1in's do. Differential-tested against a naive three-list model.
 - [ ] **M3.3** `LruKPolicy` (K=2) — backward-K-distance min-heap + history list
 - [ ] **M3.4** `ArcPolicy` — T1/T2/B1/B2 + adaptive `p`, with a 6-part invariant assertion
 - [ ] **M3.5** `CountMinSketch` — 4-bit counters packed into `long[]`, conservative update, periodic halving

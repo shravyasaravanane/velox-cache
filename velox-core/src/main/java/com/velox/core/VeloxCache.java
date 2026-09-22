@@ -435,6 +435,8 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
             return;
         }
 
+        policy.beforeInsert(key);
+
         Node<K, V> candidate = new Node<>(key, value, hash);
         candidate.setWeight(weight);
 
@@ -460,6 +462,7 @@ public final class VeloxCache<K, V> implements Cache<K, V> {
                 enqueue(key, value, RemovalCause.SIZE);   // refused on the way in: still reported
                 return;
             }
+            policy.onEvict(victim);          // pushed out for lack of room, not deleted
             data.remove(victim.key(), victim.hash());
             detach(victim, RemovalCause.SIZE);
         }

@@ -121,6 +121,12 @@ public final class Node<K, V> {
     /** Free-form pointer for a policy's own structures, e.g. the frequency bucket an LFU entry sits in. */
     Object policyData;
 
+    /**
+     * Which of a policy's lists this node is on (probation or protected, window or main,
+     * recent or frequent). Set by the segmented policies; meaningless to the others.
+     */
+    int segment;
+
     // ------------------------------------------------------------------
     //  Expiry bookkeeping
     // ------------------------------------------------------------------
@@ -283,6 +289,14 @@ public final class Node<K, V> {
     /** @param policyData the owning policy's private data for this node */
     public void setPolicyData(Object policyData) {
         this.policyData = policyData;
+    }
+
+    public int segment() {
+        return segment;
+    }
+
+    public void setSegment(int segment) {
+        this.segment = segment;
     }
 
     /** @return whether this entry currently has an expiry deadline */
