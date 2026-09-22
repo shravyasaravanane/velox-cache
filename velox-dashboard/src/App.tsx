@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { BenchmarkExplorerScreen } from './screens/BenchmarkExplorerScreen'
 import { ChaosScreen } from './screens/ChaosScreen'
+import { HotKeysScreen } from './screens/HotKeysScreen'
 import { LiveOpsScreen } from './screens/LiveOpsScreen'
 import { BORDER, MUTED, PAGE_BG, TEAL, TEXT } from './theme'
 
 const SCREENS = [
   { id: 'live-ops', label: 'Live Ops', render: () => <LiveOpsScreen /> },
+  { id: 'hot-keys', label: 'Hot Keys', render: () => <HotKeysScreen /> },
   { id: 'chaos', label: 'Chaos', render: () => <ChaosScreen /> },
   { id: 'benchmarks', label: 'Benchmarks', render: () => <BenchmarkExplorerScreen /> },
 ] as const

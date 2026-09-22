@@ -1,5 +1,6 @@
 package com.velox.server.livestats;
 
+import com.velox.core.sketch.HyperLogLog;
 import com.velox.core.stats.CacheStats;
 import com.velox.server.cache.HotSwappableCache;
 import com.velox.server.domain.ProductDetails;
@@ -36,15 +37,19 @@ public class LiveStatsBroadcaster {
 
     private final HotSwappableCache<Long, ProductDetails> primaryCache;
     private final LatencyRingBuffer latencyRingBuffer;
+    private final HyperLogLog cardinalityEstimator;
+    private final TopKTracker topKTracker;
     private final List<SseEmitter> emitters = new CopyOnWriteArrayList<>();
 
     private CacheStats previousStats;
     private long previousTickNanos;
 
     public LiveStatsBroadcaster(HotSwappableCache<Long, ProductDetails> primaryCache,
-            LatencyRingBuffer latencyRingBuffer) {
+            LatencyRingBuffer latencyRingBuffer, HyperLogLog cardinalityEstimator, TopKTracker topKTracker) {
         this.primaryCache = primaryCache;
         this.latencyRingBuffer = latencyRingBuffer;
+        this.cardinalityEstimator = cardinalityEstimator;
+        this.topKTracker = topKTracker;
         this.previousStats = primaryCache.stats();
         this.previousTickNanos = System.nanoTime();
     }
@@ -88,7 +93,9 @@ public class LiveStatsBroadcaster {
                         latencyRingBuffer.percentileMillis(0.50),
                         latencyRingBuffer.percentileMillis(0.90),
                         latencyRingBuffer.percentileMillis(0.99),
-                        latencyRingBuffer.percentileMillis(0.999)));
+                        latencyRingBuffer.percentileMillis(0.999)),
+                cardinalityEstimator.estimate(),
+                topKTracker.topK());
 
         for (SseEmitter emitter : emitters) {
             try {

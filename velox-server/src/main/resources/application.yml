@@ -37,9 +37,10 @@ management:
 
 # This application's own configuration -- see each consumer's Javadoc for why it exists:
 # DataSeeder (seed-products, seed-random-seed), CatalogQueryService (db-latency-ms),
-# CacheConfig (cache-capacity, cache-policy), CacheVariants (ab-policies) and
-# ProductCacheService (double-delete-delay-ms). write-behind-flush-ms defaults to 2000 in
-# WriteBehindBuffer itself, so it is only listed here to be easy to find.
+# CacheConfig (cache-capacity, cache-policy), CacheVariants (ab-policies),
+# ProductCacheService (double-delete-delay-ms) and LiveStatsConfig (hll-precision, top-k).
+# write-behind-flush-ms defaults to 2000 in WriteBehindBuffer itself, so it is only listed
+# here to be easy to find.
 velox:
   demo:
     seed-products: 1000000
@@ -51,6 +52,10 @@ velox:
     # "off" (bypass caching entirely). Each gets its own independent cache instance, all sized
     # from cache-capacity.
     ab-policies: LRU,ARC,W_TINY_LFU
+    # HyperLogLog precision (14 -> ~0.8% error, 16 KB) and how many hot keys Space-Saving
+    # tracks -- both drive the dashboard's Hot Keys panel (M6.5).
+    hll-precision: 14
+    top-k: 10
 
 logging:
   level:

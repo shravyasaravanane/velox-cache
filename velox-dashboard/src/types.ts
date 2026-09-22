@@ -5,6 +5,11 @@ export interface LatencyPercentilesMs {
   p999: number
 }
 
+export interface TopKeyEntry {
+  key: number
+  count: number
+}
+
 /** Mirrors com.velox.server.livestats.LiveStatsFrame, field for field. */
 export interface LiveStatsFrame {
   timestampMillis: number
@@ -18,6 +23,8 @@ export interface LiveStatsFrame {
   capacityFillPercent: number
   shardSizes: number[]
   latencyMs: LatencyPercentilesMs
+  distinctKeysEstimate: number
+  topKeys: TopKeyEntry[]
 }
 
 /** Mirrors com.velox.server.api.ChaosController.Report -- the before/after CacheStats delta

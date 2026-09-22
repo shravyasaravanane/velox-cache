@@ -1,10 +1,12 @@
 package com.velox.server.api;
 
+import com.velox.core.sketch.HyperLogLog;
 import com.velox.server.cache.CacheVariants;
 import com.velox.server.cache.ProductCacheService;
 import com.velox.server.cache.ProductUpdate;
 import com.velox.server.domain.ProductDetails;
 import com.velox.server.livestats.LatencyRingBuffer;
+import com.velox.server.livestats.TopKTracker;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -25,12 +27,16 @@ public class ProductController {
     private final ProductCacheService productCacheService;
     private final CacheVariants cacheVariants;
     private final LatencyRingBuffer latencyRingBuffer;
+    private final HyperLogLog cardinalityEstimator;
+    private final TopKTracker topKTracker;
 
     public ProductController(ProductCacheService productCacheService, CacheVariants cacheVariants,
-            LatencyRingBuffer latencyRingBuffer) {
+            LatencyRingBuffer latencyRingBuffer, HyperLogLog cardinalityEstimator, TopKTracker topKTracker) {
         this.productCacheService = productCacheService;
         this.cacheVariants = cacheVariants;
         this.latencyRingBuffer = latencyRingBuffer;
+        this.cardinalityEstimator = cardinalityEstimator;
+        this.topKTracker = topKTracker;
     }
 
     /**
@@ -42,9 +48,10 @@ public class ProductController {
      * id range under each value and compare {@code GET /api/stats}' per-variant hit rate and
      * latency afterward.
      *
-     * <p>Only the default (primary-cache) path feeds {@link LatencyRingBuffer}, which drives the
-     * live dashboard's latency percentile bars -- the dashboard watches the one cache the admin
-     * hot-swap endpoints actually control, not the disposable A/B comparison caches.
+     * <p>Only the default (primary-cache) path feeds {@link LatencyRingBuffer}, {@link
+     * HyperLogLog} and {@link TopKTracker}, which drive the live dashboard's latency percentile
+     * bars and hot-keys panel -- the dashboard watches the one cache the admin hot-swap
+     * endpoints actually control, not the disposable A/B comparison caches.
      */
     @GetMapping("/api/products/{id}")
     public ResponseEntity<?> getProduct(@PathVariable long id,
@@ -57,6 +64,8 @@ public class ProductController {
                         .orElseGet(() -> ResponseEntity.notFound().build());
             } finally {
                 latencyRingBuffer.record(System.nanoTime() - start);
+                cardinalityEstimator.add(id);
+                topKTracker.record(id);
             }
         }
         try {
