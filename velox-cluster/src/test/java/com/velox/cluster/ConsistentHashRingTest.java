@@ -46,6 +46,25 @@ class ConsistentHashRingTest {
     }
 
     @Test
+    @DisplayName("nodesFor returns distinct physical nodes, starting with the primary owner, and never more than exist")
+    void nodesForReturnsDistinctNodesStartingWithThePrimaryOwner() {
+        var ring = new ConsistentHashRing(160);
+        ring.addNode("A");
+        ring.addNode("B");
+        ring.addNode("C");
+
+        String key = "some-key";
+        String primary = ring.nodeFor(key);
+        java.util.List<String> replicas = ring.nodesFor(key, 2);
+
+        assertEquals(2, replicas.size());
+        assertEquals(primary, replicas.get(0), "nodesFor's first entry must agree with nodeFor");
+        assertEquals(2, java.util.Set.copyOf(replicas).size(), "the two entries must be distinct physical nodes");
+
+        assertEquals(3, ring.nodesFor(key, 10).size(), "cannot return more distinct nodes than exist on the ring");
+    }
+
+    @Test
     @DisplayName("addNode/removeNode are idempotent no-ops when the node is already/not present")
     void addRemoveAreIdempotent() {
         var ring = new ConsistentHashRing(160);

@@ -112,6 +112,45 @@ public final class ConsistentHashRing {
         return owners[index];
     }
 
+    /**
+     * @return up to {@code count} <b>distinct physical nodes</b> for {@code key}: its primary
+     *         owner ({@link #nodeFor}) first, then whichever nodes come next walking clockwise
+     *         around the ring, skipping any further virtual points belonging to a physical node
+     *         already returned -- the standard way a consistent-hash ring picks a replica set,
+     *         not just a single owner. Returns fewer than {@code count} if the ring has fewer
+     *         than {@code count} distinct physical nodes.
+     * @throws IllegalStateException if the ring has no nodes
+     * @implNote O(count * log(N * virtualNodesPerNode)) in the typical case; O(N *
+     *           virtualNodesPerNode) worst case if most points belong to already-chosen nodes
+     */
+    public synchronized List<String> nodesFor(String key, int count) {
+        if (sortedHashes.length == 0) {
+            throw new IllegalStateException("cannot route a key: the ring has no nodes");
+        }
+        int limit = Math.min(count, nodes.size());
+        List<String> result = new ArrayList<>(limit);
+
+        long hash = hash64(key);
+        int index = Arrays.binarySearch(sortedHashes, hash);
+        if (index < 0) {
+            index = -index - 1;
+        }
+        if (index == sortedHashes.length) {
+            index = 0;
+        }
+
+        int scanned = 0;
+        while (result.size() < limit && scanned < sortedHashes.length) {
+            String owner = owners[index];
+            if (!result.contains(owner)) {
+                result.add(owner);
+            }
+            index = (index + 1) % sortedHashes.length;
+            scanned++;
+        }
+        return result;
+    }
+
     private void rebuild() {
         List<Point> points = new ArrayList<>(nodes.size() * virtualNodesPerNode);
         for (String node : nodes) {
