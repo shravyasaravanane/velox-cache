@@ -1,5 +1,6 @@
 package com.velox.bench;
 
+import com.velox.bench.workload.AliasSampler;
 import com.velox.core.Cache;
 import com.velox.core.CacheBuilder;
 

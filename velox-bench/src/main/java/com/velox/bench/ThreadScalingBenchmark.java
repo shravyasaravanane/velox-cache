@@ -1,6 +1,7 @@
 package com.velox.bench;
 
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.velox.bench.workload.AliasSampler;
 import com.velox.core.Cache;
 import com.velox.core.CacheBuilder;
 import com.velox.core.ShardedCache;

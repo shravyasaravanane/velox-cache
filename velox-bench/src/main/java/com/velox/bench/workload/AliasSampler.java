@@ -1,4 +1,4 @@
-package com.velox.bench;
+package com.velox.bench.workload;
 
 import java.util.SplittableRandom;
 
@@ -30,7 +30,7 @@ import java.util.SplittableRandom;
  * that happened to start close together re-request each other's keys and inflated hit
  * ratios by an amount that varied from run to run.
  */
-final class AliasSampler {
+public final class AliasSampler {
 
     private final double[] probability;
     private final int[] alias;
@@ -38,7 +38,7 @@ final class AliasSampler {
     /**
      * @param weights relative weights of the outcomes; need not sum to 1
      */
-    AliasSampler(double[] weights) {
+    public AliasSampler(double[] weights) {
         int n = weights.length;
         double total = 0;
         for (double w : weights) {
@@ -87,13 +87,13 @@ final class AliasSampler {
      * @param random the caller's own generator; never shared between threads
      * @return an outcome index, distributed according to the weights
      */
-    int sample(SplittableRandom random) {
+    public int sample(SplittableRandom random) {
         int column = random.nextInt(probability.length);
         return random.nextDouble() < probability[column] ? column : alias[column];
     }
 
     /** @return a sampler for a Zipf distribution: outcome i has weight 1 / (i+1)^theta */
-    static AliasSampler zipf(int keys, double theta) {
+    public static AliasSampler zipf(int keys, double theta) {
         double[] weights = new double[keys];
         for (int i = 0; i < keys; i++) {
             weights[i] = 1.0 / Math.pow(i + 1, theta);

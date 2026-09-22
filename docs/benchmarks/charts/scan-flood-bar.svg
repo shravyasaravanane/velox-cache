@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="460" viewBox="0 0 760 460" font-family="Segoe UI, Arial, sans-serif">
+<rect width="760" height="460" fill="white"/>
+<text x="380.0" y="24" text-anchor="middle" font-size="17" font-weight="600">Scan-flood at capacity 50 (hot pool 300 keys, bursts of 400 cold keys)</text>
+<line x1="70" y1="40" x2="70" y2="400" stroke="#333"/>
+<line x1="70" y1="400" x2="680" y2="400" stroke="#333"/>
+<line x1="70" y1="400.0" x2="680" y2="400.0" stroke="#eee"/>
+<text x="60" y="404.0" text-anchor="end" font-size="11" fill="#333">0%</text>
+<line x1="70" y1="310.0" x2="680" y2="310.0" stroke="#eee"/>
+<text x="60" y="314.0" text-anchor="end" font-size="11" fill="#333">25%</text>
+<line x1="70" y1="220.0" x2="680" y2="220.0" stroke="#eee"/>
+<text x="60" y="224.0" text-anchor="end" font-size="11" fill="#333">50%</text>
+<line x1="70" y1="130.0" x2="680" y2="130.0" stroke="#eee"/>
+<text x="60" y="134.0" text-anchor="end" font-size="11" fill="#333">75%</text>
+<line x1="70" y1="40.0" x2="680" y2="40.0" stroke="#eee"/>
+<text x="60" y="44.0" text-anchor="end" font-size="11" fill="#333">100%</text>
+<rect x="80.2" y="223.8" width="30.5" height="176.2" fill="#1f77b4"/>
+<text x="95.4" y="219.8" text-anchor="middle" font-size="10" fill="#222">49.0%</text>
+<text x="95.4" y="414" text-anchor="end" font-size="11" fill="#333" transform="rotate(-40 95.4 414)">LRU</text>
+<rect x="131.0" y="240.7" width="30.5" height="159.3" fill="#8c564b"/>
+<text x="146.2" y="236.7" text-anchor="middle" font-size="10" fill="#222">44.3%</text>
+<text x="146.2" y="414" text-anchor="end" font-size="11" fill="#333" transform="rotate(-40 146.2 414)">FIFO</text>
+<rect x="181.8" y="220.0" width="30.5" height="180.0" fill="#9467bd"/>
+<text x="197.1" y="216.0" text-anchor="middle" font-size="10" fill="#222">50.0%</text>
+<text x="197.1" y="414" text-anchor="end" font-size="11" fill="#333" transform="rotate(-40 197.1 414)">CLOCK</text>
+<rect x="232.7" y="242.1" width="30.5" height="157.9" fill="#7f7f7f"/>
+<text x="247.9" y="238.1" text-anchor="middle" font-size="10" fill="#222">43.9%</text>
+<text x="247.9" y="414" text-anchor="end" font-size="11" fill="#333" transform="rotate(-40 247.9 414)">RANDOM</text>
+<rect x="283.5" y="200.4" width="30.5" height="199.6" fill="#2ca02c"/>
+<text x="298.8" y="196.4" text-anchor="middle" font-size="10" fill="#222">55.4%</text>
+<text x="298.8" y="414" text-anchor="end" font-size="11" fill="#333" transform="rotate(-40 298.8 414)">LFU</text>
+<rect x="334.3" y="200.7" width="30.5" height="199.3" fill="#98df8a"/>
+<text x="349.6" y="196.7" text-anchor="middle" font-size="10" fill="#222">55.4%</text>
+<text x="349.6" y="414" text-anchor="end" font-size="11" fill="#333" transform="rotate(-40 349.6 414)">LFU-AGED</text>
+<rect x="385.2" y="200.3" width="30.5" height="199.7" fill="#ff7f0e"/>
+<text x="400.4" y="196.3" text-anchor="middle" font-size="10" fill="#222">55.5%</text>
+<text x="400.4" y="414" text-anchor="end" font-size="11" fill="#333" transform="rotate(-40 400.4 414)">SLRU</text>
+<rect x="436.0" y="206.8" width="30.5" height="193.2" fill="#d62728"/>
+<text x="451.3" y="202.8" text-anchor="middle" font-size="10" fill="#222">53.7%</text>
+<text x="451.3" y="414" text-anchor="end" font-size="11" fill="#333" transform="rotate(-40 451.3 414)">2Q</text>
+<rect x="486.8" y="191.8" width="30.5" height="208.2" fill="#e377c2"/>
+<text x="502.1" y="187.8" text-anchor="middle" font-size="10" fill="#222">57.8%</text>
+<text x="502.1" y="414" text-anchor="end" font-size="11" fill="#333" transform="rotate(-40 502.1 414)">LRU-2</text>
+<rect x="537.7" y="208.0" width="30.5" height="192.0" fill="#17becf"/>
+<text x="552.9" y="204.0" text-anchor="middle" font-size="10" fill="#222">53.3%</text>
+<text x="552.9" y="414" text-anchor="end" font-size="11" fill="#333" transform="rotate(-40 552.9 414)">ARC</text>
+<rect x="588.5" y="200.6" width="30.5" height="199.4" fill="#bcbd22"/>
+<text x="603.8" y="196.6" text-anchor="middle" font-size="10" fill="#222">55.4%</text>
+<text x="603.8" y="414" text-anchor="end" font-size="11" fill="#333" transform="rotate(-40 603.8 414)">W-TinyLFU</text>
+<rect x="639.3" y="166.8" width="30.5" height="233.2" fill="#000000"/>
+<text x="654.6" y="162.8" text-anchor="middle" font-size="10" fill="#222">64.8%</text>
+<text x="654.6" y="414" text-anchor="end" font-size="11" fill="#333" transform="rotate(-40 654.6 414)">BELADY-OPTIMAL</text>
+</svg>

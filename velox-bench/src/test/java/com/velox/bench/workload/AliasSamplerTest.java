@@ -1,4 +1,4 @@
-package com.velox.bench;
+package com.velox.bench.workload;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

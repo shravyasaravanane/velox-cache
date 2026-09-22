@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="460" viewBox="0 0 760 460" font-family="Segoe UI, Arial, sans-serif">
+<rect width="760" height="460" fill="white"/>
+<text x="380.0" y="24" text-anchor="middle" font-size="17" font-weight="600">Hit rate vs capacity -- Zipf(0.99), 5,000 keys</text>
+
+<line x1="70" y1="40" x2="70" y2="400" stroke="#333"/>
+<line x1="70" y1="400" x2="540" y2="400" stroke="#333"/>
+<line x1="70" y1="400.0" x2="540" y2="400.0" stroke="#eee"/>
+<text x="60" y="404.0" text-anchor="end" font-size="11" fill="#333">0%</text>
+<line x1="70" y1="310.0" x2="540" y2="310.0" stroke="#eee"/>
+<text x="60" y="314.0" text-anchor="end" font-size="11" fill="#333">25%</text>
+<line x1="70" y1="220.0" x2="540" y2="220.0" stroke="#eee"/>
+<text x="60" y="224.0" text-anchor="end" font-size="11" fill="#333">50%</text>
+<line x1="70" y1="130.0" x2="540" y2="130.0" stroke="#eee"/>
+<text x="60" y="134.0" text-anchor="end" font-size="11" fill="#333">75%</text>
+<line x1="70" y1="40.0" x2="540" y2="40.0" stroke="#eee"/>
+<text x="60" y="44.0" text-anchor="end" font-size="11" fill="#333">100%</text>
+<text x="70.0" y="422" text-anchor="middle" font-size="12" fill="#333">50</text>
+<text x="305.0" y="422" text-anchor="middle" font-size="12" fill="#333">200</text>
+<text x="540.0" y="422" text-anchor="middle" font-size="12" fill="#333">1000</text>
+<text x="305.0" y="450" text-anchor="middle" font-size="12" fill="#555">capacity (entries)</text>
+<text x="18" y="220.0" text-anchor="middle" font-size="12" fill="#555" transform="rotate(-90 18 220.0)">hit rate</text>
+<path d="M70.0,280.3 L305.0,215.4 L540.0,133.3" fill="none" stroke="#1f77b4" stroke-width="1.8"/>
+<circle cx="70.0" cy="280.3" r="3" fill="#1f77b4"/>
+<circle cx="305.0" cy="215.4" r="3" fill="#1f77b4"/>
+<circle cx="540.0" cy="133.3" r="3" fill="#1f77b4"/>
+<path d="M70.0,296.9 L305.0,233.5 L540.0,148.8" fill="none" stroke="#8c564b" stroke-width="1.8"/>
+<circle cx="70.0" cy="296.9" r="3" fill="#8c564b"/>
+<circle cx="305.0" cy="233.5" r="3" fill="#8c564b"/>
+<circle cx="540.0" cy="148.8" r="3" fill="#8c564b"/>
+<path d="M70.0,274.9 L305.0,210.6 L540.0,130.2" fill="none" stroke="#9467bd" stroke-width="1.8"/>
+<circle cx="70.0" cy="274.9" r="3" fill="#9467bd"/>
+<circle cx="305.0" cy="210.6" r="3" fill="#9467bd"/>
+<circle cx="540.0" cy="130.2" r="3" fill="#9467bd"/>
+<path d="M70.0,296.9 L305.0,233.5 L540.0,148.7" fill="none" stroke="#7f7f7f" stroke-width="1.8"/>
+<circle cx="70.0" cy="296.9" r="3" fill="#7f7f7f"/>
+<circle cx="305.0" cy="233.5" r="3" fill="#7f7f7f"/>
+<circle cx="540.0" cy="148.7" r="3" fill="#7f7f7f"/>
+<path d="M70.0,237.0 L305.0,183.8 L540.0,117.6" fill="none" stroke="#2ca02c" stroke-width="1.8"/>
+<circle cx="70.0" cy="237.0" r="3" fill="#2ca02c"/>
+<circle cx="305.0" cy="183.8" r="3" fill="#2ca02c"/>
+<circle cx="540.0" cy="117.6" r="3" fill="#2ca02c"/>
+<path d="M70.0,247.4 L305.0,189.2 L540.0,118.9" fill="none" stroke="#98df8a" stroke-width="1.8"/>
+<circle cx="70.0" cy="247.4" r="3" fill="#98df8a"/>
+<circle cx="305.0" cy="189.2" r="3" fill="#98df8a"/>
+<circle cx="540.0" cy="118.9" r="3" fill="#98df8a"/>
+<path d="M70.0,238.8 L305.0,183.7 L540.0,117.6" fill="none" stroke="#ff7f0e" stroke-width="1.8"/>
+<circle cx="70.0" cy="238.8" r="3" fill="#ff7f0e"/>
+<circle cx="305.0" cy="183.7" r="3" fill="#ff7f0e"/>
+<circle cx="540.0" cy="117.6" r="3" fill="#ff7f0e"/>
+<path d="M70.0,243.7 L305.0,188.9 L540.0,123.3" fill="none" stroke="#d62728" stroke-width="1.8"/>
+<circle cx="70.0" cy="243.7" r="3" fill="#d62728"/>
+<circle cx="305.0" cy="188.9" r="3" fill="#d62728"/>
+<circle cx="540.0" cy="123.3" r="3" fill="#d62728"/>
+<path d="M70.0,230.3 L305.0,179.7 L540.0,117.5" fill="none" stroke="#e377c2" stroke-width="1.8"/>
+<circle cx="70.0" cy="230.3" r="3" fill="#e377c2"/>
+<circle cx="305.0" cy="179.7" r="3" fill="#e377c2"/>
+<circle cx="540.0" cy="117.5" r="3" fill="#e377c2"/>
+<path d="M70.0,240.3 L305.0,186.5 L540.0,124.5" fill="none" stroke="#17becf" stroke-width="1.8"/>
+<circle cx="70.0" cy="240.3" r="3" fill="#17becf"/>
+<circle cx="305.0" cy="186.5" r="3" fill="#17becf"/>
+<circle cx="540.0" cy="124.5" r="3" fill="#17becf"/>
+<path d="M70.0,239.2 L305.0,184.1 L540.0,117.9" fill="none" stroke="#bcbd22" stroke-width="1.8"/>
+<circle cx="70.0" cy="239.2" r="3" fill="#bcbd22"/>
+<circle cx="305.0" cy="184.1" r="3" fill="#bcbd22"/>
+<circle cx="540.0" cy="117.9" r="3" fill="#bcbd22"/>
+<path d="M70.0,206.7 L305.0,150.2 L540.0,88.2" fill="none" stroke="#000000" stroke-width="3" stroke-dasharray="6,4"/>
+<circle cx="70.0" cy="206.7" r="3" fill="#000000"/>
+<circle cx="305.0" cy="150.2" r="3" fill="#000000"/>
+<circle cx="540.0" cy="88.2" r="3" fill="#000000"/>
+<line x1="560" y1="46" x2="580" y2="46" stroke="#1f77b4" stroke-width="3"/>
+<text x="586" y="50" font-size="12" fill="#222">LRU</text>
+<line x1="560" y1="66" x2="580" y2="66" stroke="#8c564b" stroke-width="3"/>
+<text x="586" y="70" font-size="12" fill="#222">FIFO</text>
+<line x1="560" y1="86" x2="580" y2="86" stroke="#9467bd" stroke-width="3"/>
+<text x="586" y="90" font-size="12" fill="#222">CLOCK</text>
+<line x1="560" y1="106" x2="580" y2="106" stroke="#7f7f7f" stroke-width="3"/>
+<text x="586" y="110" font-size="12" fill="#222">RANDOM</text>
+<line x1="560" y1="126" x2="580" y2="126" stroke="#2ca02c" stroke-width="3"/>
+<text x="586" y="130" font-size="12" fill="#222">LFU</text>
+<line x1="560" y1="146" x2="580" y2="146" stroke="#98df8a" stroke-width="3"/>
+<text x="586" y="150" font-size="12" fill="#222">LFU-AGED</text>
+<line x1="560" y1="166" x2="580" y2="166" stroke="#ff7f0e" stroke-width="3"/>
+<text x="586" y="170" font-size="12" fill="#222">SLRU</text>
+<line x1="560" y1="186" x2="580" y2="186" stroke="#d62728" stroke-width="3"/>
+<text x="586" y="190" font-size="12" fill="#222">2Q</text>
+<line x1="560" y1="206" x2="580" y2="206" stroke="#e377c2" stroke-width="3"/>
+<text x="586" y="210" font-size="12" fill="#222">LRU-2</text>
+<line x1="560" y1="226" x2="580" y2="226" stroke="#17becf" stroke-width="3"/>
+<text x="586" y="230" font-size="12" fill="#222">ARC</text>
+<line x1="560" y1="246" x2="580" y2="246" stroke="#bcbd22" stroke-width="3"/>
+<text x="586" y="250" font-size="12" fill="#222">W-TinyLFU</text>
+<line x1="560" y1="266" x2="580" y2="266" stroke="#000000" stroke-width="3"/>
+<text x="586" y="270" font-size="12" fill="#222">BELADY-OPTIMAL</text>
+</svg>

@@ -136,12 +136,12 @@ Build **strictly in tier order**. Every tier ends at a demoable, committable, de
 <details>
 <summary><b>Tier 4 — Benchmark Lab</b></summary>
 
-- [ ] **M4.1** Workload generators: uniform, **Zipfian via Vose's alias method**, scan, loop, hot-set-shift, two-pool, adversarial
+- [x] **M4.1** Workload generators in `com.velox.bench.workload.Workloads`: uniform, Zipfian (reusing Tier 2's `AliasSampler`, moved here and made public), scan, loop, hot-set-shift, two-pool, and an adversarial scan-flood (a Zipfian hot core periodically interrupted by a burst through a disjoint, never-repeating cold range — the standard scan-resistance test). Each returns a `Workload` (name + key space + a deterministic seed-to-trace generator), so the exact same trace can be replayed against every policy. 9 tests covering range, determinism and each generator's structural claim.
 - [ ] **M4.2** Streaming trace loader + 2–3 checked-in sample traces + downloader script for the full ARC/Twitter sets
-- [ ] **M4.3** `MatrixRunner` — policies × capacities × workloads → `results.csv`
+- [x] **M4.3** `MatrixRunner` — every one of the 11 policies x 3 capacities (50/200/1,000) x 8 workloads x 3 seeds, 300,000 requests each, cache-aside, written to `docs/benchmarks/data/hit-ratio-matrix.csv` (864 rows) alongside a `BELADY-OPTIMAL` ceiling row from `BeladyOracle` on the identical trace.
 - [ ] **M4.4** JMH suite: get-heavy / mixed / write-heavy × 1,2,4,8,16 threads vs `ConcurrentHashMap`, synchronized `LinkedHashMap`, Guava, Caffeine
-- [ ] **M4.5** Chart generation + `docs/benchmarks/RESULTS.md` with methodology and error bars
-- [ ] ✅ **Checkpoint:** the hit-ratio-vs-capacity chart with the Belady ceiling
+- [x] **M4.5** Four SVG charts (self-contained, no JS dependency, render natively on GitHub) + [`docs/benchmarks/RESULTS.md`](docs/benchmarks/RESULTS.md): methodology, per-workload findings, and an **investigated, not glossed-over, surprise** — ARC scores ~0% on the adversarial loop despite its scan-resistant reputation; a small instrumented case (capacity 5) traced the exact mechanism (T1 empties within one loop cycle, after which T2 thrashes in the loop's own order) and the finding is reported with that evidence rather than tuned away.
+- [x] ✅ **Checkpoint:** the hit-ratio-vs-capacity chart with the Belady ceiling — [`charts/hit-rate-vs-capacity-zipf.svg`](docs/benchmarks/charts/hit-rate-vs-capacity-zipf.svg)
 </details>
 
 <details>
