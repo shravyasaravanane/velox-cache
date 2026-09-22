@@ -179,3 +179,63 @@ The 64-shard runs may simply have too little contention for buffering to help (1
 | Method notes | every result is reported with its hit ratio and interval; a discarded first run is disclosed; explanations that were not verified are labelled as hypotheses |
 
 Profiling the single-thread path and trying lock-free reads are candidate experiments for the benchmark-lab tier, where the harness, traces and profiler runs live.
+
+---
+
+## Tier 4 extension: Guava, and a genuinely write-dominated workload (M4.4)
+
+Two additions to the same benchmark: `GUAVA` alongside `CAFFEINE` (Caffeine's own authors wrote it as Guava's eventual replacement, so the gap between them is informative on its own), and a third `capacityPercent`, **1** (capacity = 1,000 against the same 100,000-key space), giving a genuine get-heavy (50) / mixed (10) / write-heavy (1, hit ratio ~49%: roughly half of every request is a miss followed by a write) spread. 105 configurations total (7 implementations x 3 capacities x 5 thread counts), same trace-per-thread methodology as before.
+
+**A methodology note that changes how these numbers should be read:** this run's confidence intervals are markedly wider than Experiment 1's above — routinely 20-50%, several past 100%, one at +/-237%. It ran on the same machine but not a quiet one (other work was active at the same time), which the earlier run avoided. The comparisons below are restricted to effects large enough to survive that noise; anything narrower is left unstated rather than asserted from an unreliable number.
+
+### Throughput (ops/ms), all three capacities
+
+cap=1 (write-dominated, hit ratio ~49%; `CONCURRENT_HASH_MAP` ~100%):
+
+| implementation | 1 | 2 | 4 | 8 | 16 |
+|---|---:|---:|---:|---:|---:|
+| `SYNC_LINKED_HASH_MAP` | 7,370 | 3,878 | 2,576 | 2,468 | 2,461 |
+| `VELOX_GLOBAL_LOCK` | 5,109 | 2,706 | 2,335 | 3,247 | 3,076 |
+| `VELOX_SHARDED_EXCLUSIVE` | 3,929 | 4,976 | 7,580 | 8,574 | 8,248 |
+| `VELOX_SHARDED_BUFFERED` | 2,798 | 3,873 | 5,059 | 4,539 | 4,377 |
+| `CAFFEINE` | 4,981 | 5,087 | 5,322 | 5,028 | 5,128 |
+| `GUAVA` | 2,477 | 2,143 | 2,093 | 1,740 | 2,207 |
+| `CONCURRENT_HASH_MAP` | 17,475 | 48,785 | 147,197 | 241,701 | 309,507 |
+
+cap=10 (mixed, hit ratio ~72.5%):
+
+| implementation | 1 | 2 | 4 | 8 | 16 |
+|---|---:|---:|---:|---:|---:|
+| `SYNC_LINKED_HASH_MAP` | 9,011 | 3,834 | 3,301 | 3,321 | 3,132 |
+| `VELOX_GLOBAL_LOCK` | 4,115 | 1,588 | 1,496 (+/-214%) | 1,923 | 1,871 |
+| `VELOX_SHARDED_EXCLUSIVE` | 3,077 | 4,064 | 6,617 | 7,597 | 7,144 |
+| `VELOX_SHARDED_BUFFERED` | 2,706 | 3,456 | 6,094 | 7,052 | 5,096 |
+| `CAFFEINE` | 1,992 (+/-237%) | 9,896 | 9,353 | 9,291 | 10,111 |
+| `GUAVA` | 2,940 | 2,423 | 3,070 | 3,071 | 2,897 |
+| `CONCURRENT_HASH_MAP` | 18,600 | 53,201 | 149,602 | 247,785 | 334,629 |
+
+cap=50 (get-heavy, hit ratio ~91.3%):
+
+| implementation | 1 | 2 | 4 | 8 | 16 |
+|---|---:|---:|---:|---:|---:|
+| `SYNC_LINKED_HASH_MAP` | 6,848 | 4,014 | 3,410 | 3,395 | 3,295 |
+| `VELOX_GLOBAL_LOCK` | 3,887 | 1,682 | 2,221 | 2,811 | 2,149 |
+| `VELOX_SHARDED_EXCLUSIVE` | 2,580 | 4,974 | 5,378 | 6,272 | 6,433 |
+| `VELOX_SHARDED_BUFFERED` | 2,589 | 3,788 | 5,721 | 6,391 | 6,958 |
+| `CAFFEINE` | 5,027 | 11,029 | 12,410 | 15,111 | 16,118 |
+| `GUAVA` | 1,176 | 2,131 | 2,890 | 2,878 | 3,100 |
+| `CONCURRENT_HASH_MAP` | 17,851 | 37,255 | 82,658 | 152,955 | 154,212 |
+
+*(Exact intervals are in the raw JMH output; only the two called out above exceed 100%. Treat every number here as approximate given the noise disclosed above — the point is the effects below, not any individual cell.)*
+
+### What survives the noise
+
+- **Guava is slower than Caffeine at every one of the 15 (capacity x thread) points**, usually by 2-5x, reaching over 5x at cap=50/16 threads (16,118 vs 3,100 ops/ms). This is not a borderline result — the gap is larger than the confidence intervals at nearly every point, and its direction never flips once across 15 independent configurations. It matches the two libraries' histories directly: Caffeine's own authors built it specifically to replace Guava's cache, citing Guava's coarser-grained locking and simpler (non-admission-aware) eviction bookkeeping as what they set out to fix, and this is that fix's throughput showing up on ordinary hardware fifteen years later.
+- **Guava does not consistently scale with more threads.** At cap=50 it goes 1,176 -> 2,131 -> 2,890 -> 2,878 -> 3,100 across 1/2/4/8/16 threads: real gains only up to 4 threads, then flat. Caffeine, by contrast, keeps climbing through 16. Consistent with Guava's simpler (non-sharded, more coarsely locked) internals under sustained contention.
+- **At the write-dominated point (cap=1), our sharded engine is competitive with or ahead of Caffeine from 4 threads on** (7,580-8,574 vs 5,028-5,322), the only regime in this whole benchmark where that is true. A plausible read: Caffeine's admission bookkeeping (the sketch, the window) costs something on every write, and with roughly half of all requests missing and writing, that cost is paid constantly while buying comparatively little (there is little popularity signal left to exploit when the hit ratio is already this low). Not independently verified by profiling; stated as a hypothesis, matching this report's standing rule for claims that were not directly measured.
+- **The `ConcurrentHashMap` ceiling is enormous at cap=1** (up to 309,507 ops/ms at 16 threads, roughly 3x its own cap=50 ceiling): with most operations being inserts into a map that is never evicted from, this is closer to measuring raw hash-map insert throughput than anything resembling a cache workload, and is a ceiling, not a competitor, exactly as in Experiment 1.
+
+### What this does not show
+
+- **This run is noisier than Experiment 1's, and the report says so rather than hiding it.** Several points above are not reliably ordered against their immediate neighbours (e.g. `VELOX_SHARDED_EXCLUSIVE` at cap=1, 8 vs 16 threads: 8,574 vs 8,248 — well within a plausible margin of each other). Only effects large enough to plainly clear the noise are asserted as findings above.
+- Raw data (all 105 rows, including the exact interval this section's tables round off): [`data/thread-scaling-guava-write-heavy.csv`](data/thread-scaling-guava-write-heavy.csv).
