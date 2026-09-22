@@ -27,6 +27,7 @@
     <modules>
         <module>velox-core</module>
         <module>velox-bench</module>
+        <module>velox-server</module>
     </modules>
 
     <properties>

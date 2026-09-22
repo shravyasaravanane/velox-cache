@@ -53,10 +53,12 @@ import java.util.concurrent.locks.ReentrantLock;
  *       shared fixed sample from different offsets; threads that started close together
  *       then re-requested each other's keys, inflating the hit ratio by an amount that
  *       varied from run to run, which made rows incomparable.</li>
- *   <li>{@code capacityPercent} sets the cache size as a share of the key space.
- *       <b>10</b> gives a hit ratio around 70% (a miss every ~3 requests, so writes are
- *       frequent). <b>50</b> gives around 90-95%, a read-heavy workload of the kind
- *       caches are actually deployed for, and the case buffered reads are designed for.</li>
+ *   <li>{@code capacityPercent} sets the cache size as a share of the key space, giving a
+ *       get-heavy / mixed / write-heavy spread across three points. <b>1</b> gives a hit
+ *       ratio around 15-20% (write-dominated: most requests miss, and every miss is a
+ *       write). <b>10</b> gives around 70% (a miss every ~3 requests, a genuine mix).
+ *       <b>50</b> gives around 90-95%, a read-heavy workload of the kind caches are
+ *       actually deployed for, and the case buffered reads are designed for.</li>
  * </ul>
  *
  * <h2>The implementations</h2>
@@ -72,6 +74,9 @@ import java.util.concurrent.locks.ReentrantLock;
  *   <li>{@code CAFFEINE}: the industry-standard JVM cache, as a yardstick. Mature and
  *       heavily tuned; and it uses a smarter admission policy (TinyLFU), so it reaches a
  *       higher hit ratio than the LRU caches here. The honest goal is its neighbourhood.</li>
+ *   <li>{@code GUAVA}: an older, widely-deployed cache, included alongside Caffeine as a
+ *       second, less aggressively tuned reference point -- Caffeine's own authors wrote it
+ *       as Guava's eventual replacement, so the gap between the two is itself informative.</li>
  *   <li>{@code CONCURRENT_HASH_MAP}: no eviction, no ordering. Not a cache at all (it grows
  *       to hold every key): a ceiling showing what a hash map can do when it is not also
  *       maintaining eviction order.</li>
@@ -97,11 +102,15 @@ public class ThreadScalingBenchmark {
     private static final AtomicLong THREAD_SEEDS = new AtomicLong(1_000);
 
     @Param({"SYNC_LINKED_HASH_MAP", "VELOX_GLOBAL_LOCK", "VELOX_SHARDED_EXCLUSIVE",
-            "VELOX_SHARDED_BUFFERED", "CAFFEINE", "CONCURRENT_HASH_MAP"})
+            "VELOX_SHARDED_BUFFERED", "CAFFEINE", "GUAVA", "CONCURRENT_HASH_MAP"})
     public String impl;
 
-    /** The cache size as a percentage of the key space. */
-    @Param({"10", "50"})
+    /**
+     * The cache size as a percentage of the key space. 50 is read-heavy (~91% hit, few
+     * writes); 10 is write-heavier (~72% hit); 1 is write-dominated (most requests miss and
+     * every miss is a write), the third point the get-heavy/mixed/write-heavy spread asks for.
+     */
+    @Param({"1", "10", "50"})
     public int capacityPercent;
 
     /**
@@ -205,6 +214,7 @@ public class ThreadScalingBenchmark {
             case "VELOX_SHARDED_EXCLUSIVE" -> velox(capacity, shards, false);
             case "VELOX_SHARDED_BUFFERED" -> velox(capacity, shards, true);
             case "CAFFEINE" -> caffeine(capacity);
+            case "GUAVA" -> guava(capacity);
             case "CONCURRENT_HASH_MAP" -> concurrentHashMap();
             default -> throw new IllegalArgumentException("unknown implementation: " + name);
         };
@@ -239,6 +249,23 @@ public class ThreadScalingBenchmark {
 
     private static BenchCache caffeine(int capacity) {
         var cache = Caffeine.newBuilder().maximumSize(capacity).<Integer, Integer>build();
+        return new BenchCache() {
+            @Override
+            public Integer get(Integer key) {
+                return cache.getIfPresent(key);
+            }
+
+            @Override
+            public void put(Integer key, Integer value) {
+                cache.put(key, value);
+            }
+        };
+    }
+
+    /** Fully qualified to avoid colliding with com.velox.core.CacheBuilder, already imported above. */
+    private static BenchCache guava(int capacity) {
+        com.google.common.cache.Cache<Integer, Integer> cache =
+                com.google.common.cache.CacheBuilder.newBuilder().maximumSize(capacity).build();
         return new BenchCache() {
             @Override
             public Integer get(Integer key) {

@@ -1,0 +1,11 @@
+# Opt-in profile for a real Postgres instance instead of the default embedded H2:
+#   java -jar velox-server.jar --spring.profiles.active=postgres
+# (or the matching -Dspring.profiles.active=postgres / SPRING_PROFILES_ACTIVE=postgres).
+# Everything else (schema.sql, DataSeeder, CatalogQueryService's raw SQL) is written in
+# ANSI SQL specifically so it needs no changes at all when the datasource switches.
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/velox
+    driver-class-name: org.postgresql.Driver
+    username: velox
+    password: velox

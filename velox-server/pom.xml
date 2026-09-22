@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  velox-server: THE DEMO
+
+  Tier 5. This is what makes "for a Web Server" in the project brief literally
+  true: a real Spring Boot application, backed by a real database, using the
+  cache engine from velox-core exactly as an application would, through its
+  public API, with no special access.
+
+  Spring Boot ships its own parent POM (spring-boot-starter-parent), which
+  normally configures plugin versions and dependency management for you. This
+  module cannot use it directly, because it already has a parent: velox-parent
+  (so it stays part of the same multi-module build as every other tier).
+  Maven does not support inheriting from two parents, so instead we IMPORT
+  Spring Boot's dependency BOM below (a documented, standard pattern for
+  exactly this situation) and configure the Spring Boot Maven plugin by hand.
+
+  Run:    mvn -pl velox-server -am spring-boot:run
+  Build:  mvn -pl velox-server -am package
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.velox</groupId>
+        <artifactId>velox-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>velox-server</artifactId>
+    <name>VeloxCache :: Demo Server</name>
+
+    <properties>
+        <spring-boot.version>3.3.5</spring-boot.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-dependencies</artifactId>
+                <version>${spring-boot.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.velox</groupId>
+            <artifactId>velox-core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!--
+          H2 in PostgreSQL compatibility mode: a real relational database, real
+          SQL, real joins, but embedded, so the demo runs with nothing to
+          install. A Postgres connection string is a one-property swap (see
+          application-postgres.yml) for anyone who wants the real thing.
+        -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>velox-server</finalName>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <version>${spring-boot.version}</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.15.0</version>
+                <configuration>
+                    <!-- Spring MVC resolves @PathVariable/@RequestParam names by reflecting on
+                         compiled parameter names, not by parsing source; without -parameters
+                         those names are erased and every such binding fails at request time,
+                         not at compile time. Every other module in this project has no
+                         reflection-based name binding, which is why this is scoped here only. -->
+                    <parameters>true</parameters>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

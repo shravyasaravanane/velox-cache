@@ -1,0 +1,48 @@
+# Default profile: H2, embedded, file-backed so the seeded catalog survives a restart
+# instead of re-seeding 1,000,000 rows every time the app starts. MODE=PostgreSQL makes H2
+# behave enough like Postgres (syntax, type coercion) that schema.sql runs unmodified
+# against either -- see application-postgres.yml for the real thing.
+spring:
+  application:
+    name: velox-server
+  datasource:
+    url: jdbc:h2:file:./data/velox-demo;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: none        # schema.sql owns the schema; see its own header comment for why
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          batch_size: 500
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: always
+
+# This application's own configuration -- see each consumer's Javadoc for why it exists:
+# DataSeeder (seed-products, seed-random-seed) and CatalogQueryService (db-latency-ms).
+velox:
+  demo:
+    seed-products: 1000000
+    seed-random-seed: 42
+    db-latency-ms: 25
+
+logging:
+  level:
+    com.velox: INFO

@@ -1,0 +1,12 @@
+# Test profile: a fresh in-memory H2 database (not the file-backed one application.yml
+# points at, so tests never touch or depend on real seeded data) and a tiny seed count, so
+# the whole suite starts in well under a second instead of minutes.
+spring:
+  datasource:
+    url: jdbc:h2:mem:velox-test;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE
+    driver-class-name: org.h2.Driver
+
+velox:
+  demo:
+    seed-products: 50
+    db-latency-ms: 0
