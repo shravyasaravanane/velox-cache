@@ -172,9 +172,9 @@ Build **strictly in tier order**. Every tier ends at a demoable, committable, de
 <details>
 <summary><b>Tier 7 — Distributed Layer</b></summary>
 
-- [ ] **M7.1** `ConsistentHashRing` — sorted `long[]` + binary search, 160 vnodes/node
-- [ ] **M7.2** Key-distribution fairness test (std-dev across nodes < 5%)
-- [ ] **M7.3** Rebalance test: prove only ~K/N keys move on join (vs ~(N-1)/N for modulo)
+- [x] **M7.1** `ConsistentHashRing` (new `velox-cluster` module, velox-core-only dependency): sorted `long[]` + binary search for the hot lookup path, `O(n log n)` full rebuild on the rare membership change. FNV-1a 64-bit over UTF-8 bytes, **plus a second SplitMix64 avalanche pass** -- see the honest finding below.
+- [x] **M7.2** Key-distribution fairness test (std-dev across nodes < 5%). **A real bug caught here**: plain FNV-1a's output had *identical top 8 bits* across a node's first several virtual points (measured directly) -- ring points sharing a long prefix (`"node-0#0"`, `"node-0#1"`, ...) leave FNV-1a's high-order bits dominated by that shared prefix, clustering all 160 of a node's points into one narrow arc instead of scattering them. Manifested as 42% std-dev against a 5% target. Fixed by running the SplitMix64 finalizer (the same one `HyperLogLog` uses) once more over FNV-1a's output -- verified directly that the same points' top bits, identical before, spread across the full byte range after. **A second, separate finding survived even after that fix**: 160 virtual nodes per physical node -- a number several real systems and most textbook write-ups cite as a typical default -- still measured 11.8% std-dev at only 5 physical nodes, more than double the 5% target. Consistent with the `1/sqrt(V)` relationship for this kind of scheme, `virtualNodesPerNode` needed to rise to ~500 before the measurement reliably cleared 5% (500 → 3.8%, and a dedicated regression test now reproduces both numbers directly rather than asserting only the passing case).
+- [x] **M7.3** Rebalance test: consistent hashing moved ~15-25% of keys on a 4→5 node join (theoretical expectation ~20%, generous band for real hash variance) versus plain `hash(key) % N` moving the large majority of keys on the same join -- both measured empirically over the identical key set in one test, not assumed numbers on either side.
 - [ ] **M7.4** `RemoteCacheClient` + router (local shard vs remote node)
 - [ ] **M7.5** Heartbeat + failure detection + automatic ring repair
 - [ ] **M7.6** Replication factor R=2 across **distinct physical** nodes + read fallback

@@ -28,6 +28,7 @@
         <module>velox-core</module>
         <module>velox-bench</module>
         <module>velox-server</module>
+        <module>velox-cluster</module>
     </modules>
 
     <properties>
