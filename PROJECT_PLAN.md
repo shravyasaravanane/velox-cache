@@ -165,8 +165,8 @@ Build **strictly in tier order**. Every tier ends at a demoable, committable, de
 - [ ] **M6.4** Screen 3 — **Policy Arena** (shadow caches racing on live traffic)
 - [ ] **M6.5** Screen 4 — Heat map + top-K hot keys + HLL cardinality
 - [ ] **M6.6** Screen 6 — Benchmark Explorer (loads the Tier-4 CSVs)
-- [ ] **M6.7** Screen 7 — **Chaos Panel** (stampede, scan flood, avalanche, penetration, kill node)
-- [ ] *(By your own choice, scope was narrowed to M6.1/M6.2 for now — see the conversation. M6.3-M6.7 remain, and the Tier 6 checkpoint below is deferred until you decide whether to continue.)*
+- [x] **M6.7** Screen — **Chaos Panel**, added to `velox-dashboard` as a second tab alongside Live Ops (kill-node excluded: that needs Tier 7's cluster to exist first). Fires the four chaos endpoints already built in Tier 5 (M5.6) with live parameter inputs, shows each call's own before/after `CacheStats` delta. Verified against the real running server: `curl -X POST .../chaos/stampede?key=10&n=200` returned `{"loads":1,"coalesced":199,...}` and `.../chaos/penetrate?n=50` returned `{"loads":50,"misses":50,...}` through the same Vite proxy the UI uses -- both exactly the behavior the endpoints' own Javadoc predicts.
+- [ ] *(M6.3-M6.6 remain (Internals Visualizer, Policy Arena, heat map, benchmark explorer) -- M6.3/M6.4 in particular need new introspection APIs on velox-core's policies, a real backend design decision, not just wiring. Tier 6 checkpoint still deferred until you decide how far to take this.)*
 - [ ] ✅ **Checkpoint:** the 3-minute demo video
 </details>
 

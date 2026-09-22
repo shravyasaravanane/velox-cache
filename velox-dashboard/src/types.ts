@@ -19,3 +19,14 @@ export interface LiveStatsFrame {
   shardSizes: number[]
   latencyMs: LatencyPercentilesMs
 }
+
+/** Mirrors com.velox.server.api.ChaosController.Report -- the before/after CacheStats delta
+ * every chaos endpoint returns. */
+export interface ChaosReport {
+  hits: number
+  misses: number
+  loads: number
+  evictions: number
+  coalesced: number
+  hitRatePercent: number
+}
