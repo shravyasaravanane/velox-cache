@@ -37,9 +37,17 @@ import com.velox.core.structure.Node;
  *
  * <p>Real web traffic is full of "one-hit wonders": keys requested exactly
  * once, ever. Letting them evict a key the cache has served fifty times is
- * the main way LRU loses hit ratio. W-TinyLFU (Tier 3) is the policy that
- * overrides {@link #admit} — and that single method is where essentially all
- * of its advantage comes from.
+ * the main way LRU loses hit ratio. {@link TinyLfuPolicy} (Tier 3) is built
+ * entirely around refusing them — but it turns out {@link #admit} is not
+ * where that refusal is expressed. Its admission duel is between two
+ * <i>already-resident</i> entries (the admission window's own outgoing entry
+ * and the main region's own outgoing entry), neither of which is the brand
+ * new arrival {@link #admit}'s {@code candidate} parameter always names.
+ * That comparison happens inside {@link #selectVictim()} instead, which is
+ * free to decide it further by choosing which resident actually leaves — see
+ * that method's documentation. {@code admit} stays available for a policy
+ * whose refusal genuinely does depend on the newcomer itself; TinyLFU's
+ * happens not to.
  *
  * <h2>Implementation contract</h2>
  *

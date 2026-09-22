@@ -86,7 +86,15 @@ public enum Policy {
      * and frequency sides is not a fixed fraction -- it is tuned continuously from the
      * cache's own ghost-list hit rate. See {@link ArcPolicy}.
      */
-    ARC("ARC", capacity -> new ArcPolicy<>(capacity));
+    ARC("ARC", capacity -> new ArcPolicy<>(capacity)),
+
+    /**
+     * The policy Caffeine ships with. A small admission window protects new arrivals from
+     * judgement; anything it evicts must outscore {@link SlruPolicy}-style main region's own
+     * outgoing entry, by an approximate frequency count that (unlike {@link #LFU}) covers
+     * keys that were never resident at all. See {@link TinyLfuPolicy}.
+     */
+    W_TINY_LFU("W-TinyLFU", capacity -> new TinyLfuPolicy<>(capacity));
 
     private final String displayName;
     private final IntFunction<EvictionPolicy<?, ?>> factory;

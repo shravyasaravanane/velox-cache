@@ -560,6 +560,119 @@ final class PolicyTestSupport {
         }
     }
 
+    /**
+     * W-TinyLFU as three plain lists (window, probation, protected), driving the SAME
+     * {@link CountMinSketch} and {@link BloomFilter} classes the real policy uses -- those
+     * are independently unit-tested elsewhere, so this model treats them as trusted
+     * primitives (the same way every other naive model here trusts {@code HashMap} and
+     * {@code ArrayList}) and focuses on independently re-deriving the list bookkeeping and
+     * the promotion duel around them.
+     */
+    static final class NaiveTinyLfu implements NaiveModel {
+        private final List<String> window = new ArrayList<>();
+        private final List<String> probation = new ArrayList<>();
+        private final List<String> protectedList = new ArrayList<>();
+        private final int windowCapacity;
+        private final int mainCapacity;
+        private final int protectedCapacity;
+        private final CountMinSketch sketch;
+        private final BloomFilter doorkeeper;
+        private final long doorkeeperResetPeriod;
+        private long referencesSinceReset;
+
+        NaiveTinyLfu(int capacity) {
+            this.windowCapacity = Math.max(1, (int) (capacity * 0.01));
+            this.mainCapacity = Math.max(0, capacity - windowCapacity);
+            this.protectedCapacity = (int) (mainCapacity * 0.8);
+            this.sketch = new CountMinSketch(capacity);
+            this.doorkeeper = new BloomFilter(Math.max(1, capacity), 4);
+            this.doorkeeperResetPeriod = 10L * Math.max(1, capacity);
+        }
+
+        private void recordUse(String key) {
+            if (doorkeeper.seenBefore(key)) {
+                sketch.increment(key);
+            }
+            if (++referencesSinceReset >= doorkeeperResetPeriod) {
+                doorkeeper.clear();
+                referencesSinceReset = 0;
+            }
+        }
+
+        @Override
+        public void beforeInsert(String key) {
+            recordUse(key);
+        }
+
+        @Override
+        public void onInsert(String key) {
+            window.add(0, key);
+        }
+
+        @Override
+        public void onAccess(String key) {
+            recordUse(key);
+            if (window.remove(key)) {
+                window.add(0, key);
+                return;
+            }
+            if (protectedList.remove(key)) {
+                protectedList.add(0, key);
+                return;
+            }
+            probation.remove(key);
+            protectedList.add(0, key);
+            if (protectedList.size() > protectedCapacity) {
+                String demoted = protectedList.remove(protectedList.size() - 1);
+                probation.add(0, demoted);
+            }
+        }
+
+        @Override
+        public void onMiss(String key) {
+        }
+
+        @Override
+        public void onRemove(String key) {
+            if (!window.remove(key) && !probation.remove(key)) {
+                protectedList.remove(key);
+            }
+        }
+
+        @Override
+        public String victim() {
+            while (window.size() > windowCapacity && probation.size() + protectedList.size() < mainCapacity) {
+                String promoted = window.remove(window.size() - 1);
+                probation.add(0, promoted);
+            }
+            if (window.size() > windowCapacity) {
+                String candidate = window.get(window.size() - 1);
+                String mainVictim = mainVictim();
+                if (mainVictim == null) {
+                    return candidate;
+                }
+                if (sketch.estimate(candidate) > sketch.estimate(mainVictim)) {
+                    window.remove(window.size() - 1);
+                    probation.add(0, candidate);
+                    return mainVictim;
+                }
+                return candidate;
+            }
+            String mainVictim = mainVictim();
+            return mainVictim != null ? mainVictim : window.get(window.size() - 1);
+        }
+
+        private String mainVictim() {
+            if (!probation.isEmpty()) {
+                return probation.get(probation.size() - 1);
+            }
+            if (!protectedList.isEmpty()) {
+                return protectedList.get(protectedList.size() - 1);
+            }
+            return null;
+        }
+    }
+
     // ------------------------------------------------------------------
     //  The differential driver
     // ------------------------------------------------------------------
