@@ -36,12 +36,21 @@ management:
       show-details: always
 
 # This application's own configuration -- see each consumer's Javadoc for why it exists:
-# DataSeeder (seed-products, seed-random-seed) and CatalogQueryService (db-latency-ms).
+# DataSeeder (seed-products, seed-random-seed), CatalogQueryService (db-latency-ms),
+# CacheConfig (cache-capacity, cache-policy), CacheVariants (ab-policies) and
+# ProductCacheService (double-delete-delay-ms). write-behind-flush-ms defaults to 2000 in
+# WriteBehindBuffer itself, so it is only listed here to be easy to find.
 velox:
   demo:
     seed-products: 1000000
     seed-random-seed: 42
     db-latency-ms: 25
+    cache-capacity: 10000
+    cache-policy: W_TINY_LFU
+    # The policies GET /api/products/{id}?cache=... can compare, alongside the always-present
+    # "off" (bypass caching entirely). Each gets its own independent cache instance, all sized
+    # from cache-capacity.
+    ab-policies: LRU,ARC,W_TINY_LFU
 
 logging:
   level:

@@ -10,3 +10,8 @@ velox:
   demo:
     seed-products: 50
     db-latency-ms: 0
+    # Large enough that the background @Scheduled flush never fires during a test run, so
+    # tests that call WriteBehindBuffer.flush() explicitly get a deterministic, single flush.
+    write-behind-flush-ms: 600000
+    # Short, so tests can wait out the delay directly instead of mocking the clock.
+    double-delete-delay-ms: 150

@@ -58,17 +58,40 @@ The **A/B toggle** and **hot-swap** endpoints are what make the live demo compel
 
 ### 1.4 The headline numbers
 
-Run the Zipfian load generator against the API with the cache off, then on, and record:
+Measured, not illustrative: `LoadGenerator` (`com.velox.server.loadgen`) against a locally running
+`velox-server`, catalog seeded at 20,000 products, `velox.demo.db-latency-ms=15`, key-space 5,000,
+Zipfian exponent 1.0, 32 concurrent virtual-thread callers.
 
-| Metric | Cache OFF | Cache ON (W-TinyLFU) | Result |
+| Metric | Cache OFF (3,000 req) | Cache ON, W-TinyLFU (20,000 req) | Result |
 |---|---|---|---|
-| Throughput | ~800 RPS | ~14,000 RPS | **17× ↑** |
-| p50 latency | 26 ms | 0.4 ms | **65× ↓** |
-| p99 latency | 84 ms | 2.1 ms | **40× ↓** |
-| DB queries/sec | 800 | 48 | **94% ↓** |
-| Hit ratio | — | 94.2% | — |
+| Throughput | 1,350 req/s | 5,534 req/s | **4.1× ↑** |
+| p50 latency | 19.2 ms | 3.5 ms | **5.5× ↓** |
+| p99 latency | 311.0 ms | 24.0 ms | **13.0× ↓** |
+| Hit ratio | — | 89.6% (cumulative, warmed by a prior 20,000-request run) | — |
 
-*(Illustrative shape only — measure your own and report exactly what you get.)* **These become your resume bullet.**
+*(Reproduce with `java -cp velox-server/target/classes com.velox.server.loadgen.LoadGenerator
+--requests=N --cache=off` and again with `--cache=w_tiny_lfu`, then `GET /api/stats`. See
+`LoadGenerator`'s own Javadoc for the exact commands.)*
+
+**Two honest caveats, stated rather than hidden:**
+
+1. This run's cache capacity (10,000) exceeds the key-space (5,000), so once warm the whole
+   worked set fits in memory with no real eviction pressure — the 89.6% hit ratio mostly shows
+   "the working set fits," not eviction-policy skill under a tight capacity. Tier 4's 864-row
+   `hit-ratio-matrix.csv` is where eviction policies are actually compared against each other and
+   against Belady's oracle under real capacity pressure; this table's job is narrower: cache vs.
+   no cache, measured at the HTTP layer.
+2. p99 latency under `cache=off` is inflated by JVM/JIT warm-up in the first few hundred
+   requests of a short 3,000-request run, not a steady-state number — a longer run would likely
+   show a tighter p99. Reported exactly as measured rather than smoothed.
+
+**A real bug this measurement caught:** the first attempt at this run threw `NullPointerException`s
+under concurrent traffic and reported thousands of errors. Root cause: `CacheBuilder.build()`
+returns a single-threaded cache unless `.concurrencyLevel(n)` is set explicitly, and neither
+`HotSwappableCache` nor `CacheVariants` were setting it — a genuine concurrency bug, invisible to
+every existing test (none of them drove real concurrent HTTP traffic against these specific
+caches), caught only once a real load generator existed to run against a real server. Fixed in
+both classes; see their Javadoc.
 
 ---
 

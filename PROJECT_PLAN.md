@@ -147,13 +147,13 @@ Build **strictly in tier order**. Every tier ends at a demoable, committable, de
 <details>
 <summary><b>Tier 5 — Web Server + Database</b></summary>
 
-- [ ] **M5.1** Spring Boot 3.3 app, Postgres (or H2 in PG mode), 1M-row seeded catalog
-- [ ] **M5.2** Deliberately expensive query path (heavy join + artificial latency knob)
-- [ ] **M5.3** Cache-aside + write-through + write-behind + invalidation on mutation
-- [ ] **M5.4** A/B toggle `?cache=off|lru|arc|tinylfu` for live side-by-side comparison
-- [ ] **M5.5** Zipfian load generator hitting the HTTP API
-- [ ] **M5.6** `/api/stats`, `/api/admin/*`, `/api/chaos/*`, Actuator + Prometheus endpoint
-- [ ] ✅ **Checkpoint:** measured DB-QPS collapse and p99 latency drop
+- [x] **M5.1** `velox-server`: Spring Boot 3.3 app, H2 in Postgres mode by default (`application-postgres.yml` opts into real Postgres), ANSI `schema.sql` (product/category/inventory/review), `DataSeeder` batched raw-JDBC seeding (`velox.demo.seed-products`, default 1,000,000, skip-if-already-seeded).
+- [x] **M5.2** `CatalogQueryService`: a genuine 4-table join + aggregate (category, inventory, review COUNT/AVG) per product detail read, plus the disclosed `velox.demo.db-latency-ms` artificial round-trip knob.
+- [x] **M5.3** `ProductCacheService`: cache-aside (now built on `Cache#get`'s single-flight loading, not a manual getIfPresent-then-put — see M5.6's stampede endpoint), write-through, write-around, write-behind (`WriteBehindBuffer`, coalescing + measured amplification reduction), delayed double-delete invalidation (documented: which race it closes, which it does not), and tag-based invalidation (`TagIndex`).
+- [x] **M5.4** `GET /api/products/{id}?cache=off|lru|arc|w_tiny_lfu` (`CacheVariants`, configurable via `velox.demo.ab-policies`): independent, read-only comparison caches, separate from the write-integrated primary. Hot-swap: `HotSwappableCache` wraps the primary cache behind an `AtomicReference`, rebuilt live (empty, by design — documented) by `POST /api/admin/policy/{name}` and `POST /api/admin/capacity/{n}`.
+- [x] **M5.5** `LoadGenerator` (`com.velox.server.loadgen`): a plain-JDK CLI (no Spring context, starts instantly) driving real HTTP traffic at `/api/products/{id}` with a Zipfian-skewed key distribution (`ZipfianSampler`, binary search over cumulative weights — the textbook technique `velox-bench`'s alias method exists to improve on, appropriate here since a draw's cost is irrelevant next to the HTTP round trip it drives).
+- [x] **M5.6** `GET /api/stats` (primary cache + every A/B variant + write-behind stats in one response), `POST /api/admin/{policy/{name},capacity/{n},invalidate,invalidate-tag/{tag}}`, `POST /api/chaos/{stampede,scan,expire-all,penetrate}` (each reports its own before/after `CacheStats` delta), plus the Actuator/Prometheus endpoints already exposed in `application.yml`.
+- [x] ✅ **Checkpoint:** measured, not illustrative -- **4.1× throughput**, **5.5× p50 / 13.0× p99 latency drop**, cache off vs. on (W-TinyLFU), full methodology and two disclosed caveats in [`docs/SYSTEM.md`](docs/SYSTEM.md)'s §1.4. The run also caught a real concurrency bug (`CacheBuilder.build()` defaults to single-threaded; `HotSwappableCache`/`CacheVariants` were not setting `concurrencyLevel`) that no existing test had caught, because none drove real concurrent HTTP traffic -- fixed before this number was taken.
 </details>
 
 <details>
