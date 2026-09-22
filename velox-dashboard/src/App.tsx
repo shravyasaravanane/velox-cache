@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { BenchmarkExplorerScreen } from './screens/BenchmarkExplorerScreen'
 import { ChaosScreen } from './screens/ChaosScreen'
+import { ClusterScreen } from './screens/ClusterScreen'
 import { HotKeysScreen } from './screens/HotKeysScreen'
 import { InternalsScreen } from './screens/InternalsScreen'
 import { LiveOpsScreen } from './screens/LiveOpsScreen'
@@ -12,6 +13,7 @@ const SCREENS = [
   { id: 'internals', label: 'Internals', render: () => <InternalsScreen /> },
   { id: 'arena', label: 'Policy Arena', render: () => <PolicyArenaScreen /> },
   { id: 'hot-keys', label: 'Hot Keys', render: () => <HotKeysScreen /> },
+  { id: 'cluster', label: 'Cluster', render: () => <ClusterScreen /> },
   { id: 'chaos', label: 'Chaos', render: () => <ChaosScreen /> },
   { id: 'benchmarks', label: 'Benchmarks', render: () => <BenchmarkExplorerScreen /> },
 ] as const

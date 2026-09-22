@@ -39,9 +39,9 @@ management:
 # DataSeeder (seed-products, seed-random-seed), CatalogQueryService (db-latency-ms),
 # CacheConfig (cache-capacity, cache-policy), CacheVariants (ab-policies),
 # ProductCacheService (double-delete-delay-ms), LiveStatsConfig (hll-precision, top-k),
-# PolicyArena (arena-capacity, arena-policies) and InternalsVisualizer (visualizer-capacity).
-# write-behind-flush-ms defaults to 2000 in WriteBehindBuffer itself, so it is only listed
-# here to be easy to find.
+# PolicyArena (arena-capacity, arena-policies), InternalsVisualizer (visualizer-capacity) and
+# ClusterProxyController (cluster-seed). write-behind-flush-ms defaults to 2000 in
+# WriteBehindBuffer itself, so it is only listed here to be easy to find.
 velox:
   demo:
     seed-products: 1000000
@@ -64,6 +64,11 @@ velox:
     # The Internals Visualizer (M6.3): kept small deliberately, so LRU/ARC/W-TinyLFU's
     # structure stays legible as boxes on screen rather than an unreadable wall of nodes.
     visualizer-capacity: 8
+    # The Cluster screen (M7.7): host:port of any one velox-cluster node, used as this app's
+    # entry point into the cluster's own membership view. velox-cluster is a separate process
+    # family this application does not start -- see com.velox.cluster.ClusterNode's Javadoc for
+    # how to launch one. If unreachable, the endpoint reports that plainly rather than erroring.
+    cluster-seed: 127.0.0.1:7001
 
 logging:
   level:

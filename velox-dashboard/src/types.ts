@@ -18,6 +18,20 @@ export interface ArenaStanding {
   hitRatePercent: number
 }
 
+/** Mirrors com.velox.server.api.ClusterProxyController.ClusterNodeView. */
+export interface ClusterNodeView {
+  id: string
+  host: string
+  port: number
+  healthy: boolean
+}
+
+/** Mirrors com.velox.server.api.ClusterProxyController.ClusterView. */
+export interface ClusterView {
+  reachable: boolean
+  nodes: ClusterNodeView[]
+}
+
 /** Mirrors com.velox.server.livestats.InternalsVisualizer.Snapshot. */
 export interface VisualizerSnapshot {
   paused: boolean
