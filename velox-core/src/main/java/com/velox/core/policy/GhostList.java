@@ -86,6 +86,11 @@ final class GhostList<K, V> {
         return order.size();
     }
 
+    /** @return every ghost key, newest first -- tests and dashboards only */
+    java.util.List<K> keysNewestFirst() {
+        return order.keysFromMruToLru();
+    }
+
     void clear() {
         order.clear();
         index.clear();

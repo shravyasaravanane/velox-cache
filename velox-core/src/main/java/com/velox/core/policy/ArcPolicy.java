@@ -223,6 +223,16 @@ public final class ArcPolicy<K, V> implements EvictionPolicy<K, V> {
         return b2.find(key, Hashing.spread(key)) != null;
     }
 
+    /** @return recency-side ghost keys (B1), newest first -- for tests and dashboards */
+    public java.util.List<K> b1Keys() {
+        return b1.keysNewestFirst();
+    }
+
+    /** @return frequency-side ghost keys (B2), newest first -- for tests and dashboards */
+    public java.util.List<K> b2Keys() {
+        return b2.keysNewestFirst();
+    }
+
     @Override
     public void assertInvariants(int expectedEntryCount) {
         if (!Invariants.ENABLED) {

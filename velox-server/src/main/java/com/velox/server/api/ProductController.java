@@ -5,6 +5,7 @@ import com.velox.server.cache.CacheVariants;
 import com.velox.server.cache.ProductCacheService;
 import com.velox.server.cache.ProductUpdate;
 import com.velox.server.domain.ProductDetails;
+import com.velox.server.livestats.InternalsVisualizer;
 import com.velox.server.livestats.LatencyRingBuffer;
 import com.velox.server.livestats.PolicyArena;
 import com.velox.server.livestats.TopKTracker;
@@ -31,16 +32,18 @@ public class ProductController {
     private final HyperLogLog cardinalityEstimator;
     private final TopKTracker topKTracker;
     private final PolicyArena policyArena;
+    private final InternalsVisualizer internalsVisualizer;
 
     public ProductController(ProductCacheService productCacheService, CacheVariants cacheVariants,
             LatencyRingBuffer latencyRingBuffer, HyperLogLog cardinalityEstimator, TopKTracker topKTracker,
-            PolicyArena policyArena) {
+            PolicyArena policyArena, InternalsVisualizer internalsVisualizer) {
         this.productCacheService = productCacheService;
         this.cacheVariants = cacheVariants;
         this.latencyRingBuffer = latencyRingBuffer;
         this.cardinalityEstimator = cardinalityEstimator;
         this.topKTracker = topKTracker;
         this.policyArena = policyArena;
+        this.internalsVisualizer = internalsVisualizer;
     }
 
     /**
@@ -72,6 +75,7 @@ public class ProductController {
                 cardinalityEstimator.add(id);
                 topKTracker.record(id);
                 policyArena.record(id);
+                internalsVisualizer.recordLiveTraffic(id);
             }
         }
         try {

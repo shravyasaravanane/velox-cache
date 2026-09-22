@@ -18,6 +18,15 @@ export interface ArenaStanding {
   hitRatePercent: number
 }
 
+/** Mirrors com.velox.server.livestats.InternalsVisualizer.Snapshot. */
+export interface VisualizerSnapshot {
+  paused: boolean
+  capacity: number
+  lru: { mruToLru: number[] }
+  arc: { t1: number[]; t2: number[]; b1: number[]; b2: number[]; targetT1Size: number }
+  tinyLfu: { window: number[]; probation: number[]; protectedKeys: number[]; frequencies: Record<string, number> }
+}
+
 /** Mirrors com.velox.server.livestats.LiveStatsFrame, field for field. */
 export interface LiveStatsFrame {
   timestampMillis: number
@@ -34,6 +43,7 @@ export interface LiveStatsFrame {
   distinctKeysEstimate: number
   topKeys: TopKeyEntry[]
   arenaStandings: ArenaStanding[]
+  visualizer: VisualizerSnapshot
 }
 
 /** Mirrors com.velox.server.api.ChaosController.Report -- the before/after CacheStats delta

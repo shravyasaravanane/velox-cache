@@ -2,12 +2,14 @@ import { useState } from 'react'
 import { BenchmarkExplorerScreen } from './screens/BenchmarkExplorerScreen'
 import { ChaosScreen } from './screens/ChaosScreen'
 import { HotKeysScreen } from './screens/HotKeysScreen'
+import { InternalsScreen } from './screens/InternalsScreen'
 import { LiveOpsScreen } from './screens/LiveOpsScreen'
 import { PolicyArenaScreen } from './screens/PolicyArenaScreen'
 import { BORDER, MUTED, PAGE_BG, TEAL, TEXT } from './theme'
 
 const SCREENS = [
   { id: 'live-ops', label: 'Live Ops', render: () => <LiveOpsScreen /> },
+  { id: 'internals', label: 'Internals', render: () => <InternalsScreen /> },
   { id: 'arena', label: 'Policy Arena', render: () => <PolicyArenaScreen /> },
   { id: 'hot-keys', label: 'Hot Keys', render: () => <HotKeysScreen /> },
   { id: 'chaos', label: 'Chaos', render: () => <ChaosScreen /> },

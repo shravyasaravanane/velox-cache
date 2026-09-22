@@ -25,22 +25,26 @@ Make the uncached path expensive in a way that is both realistic and controllabl
 
 ```
 GET  /api/products/{id}                 cache-aside read
-GET  /api/products/search?q=&page=      cached query results (composite key)
-POST /api/products/{id}                 write-through + invalidate
-GET  /api/products/{id}?cache=off|lru|arc|tinylfu     ← A/B toggle, live
+POST /api/products/{id}?mode=...        write-through | write-around | write-behind | delayed-double-delete
+GET  /api/products/{id}?cache=off|lru|arc|w_tiny_lfu   ← A/B toggle, live (CacheVariants)
 
-GET  /api/stats                         full CacheStats snapshot
+GET  /api/stats                         full CacheStats snapshot (primary + every A/B variant + write-behind)
 GET  /api/stats/stream                  SSE, 10 Hz, drives the dashboard
 
 POST /api/admin/policy/{name}           hot-swap the eviction policy
 POST /api/admin/capacity/{n}            resize the cache live
 POST /api/admin/invalidate              flush
+POST /api/admin/invalidate-tag/{tag}    drop every product filed under a category tag
 
 POST /api/chaos/stampede?key=&n=1000    fire N concurrent requests at one cold key
-POST /api/chaos/scan?n=100000           flood with a sequential scan
+POST /api/chaos/scan?startId=&n=100000  flood with a sequential scan
 POST /api/chaos/expire-all              trigger mass expiry (avalanche demo)
 POST /api/chaos/penetrate?n=10000       request keys that do not exist
 POST /api/chaos/kill-node/{id}          (Tier 7) drop a cluster node
+
+POST /api/visualizer/pause              freeze the Internals Visualizer against live traffic
+POST /api/visualizer/resume             un-freeze it
+POST /api/visualizer/step?key=          apply exactly one access by hand -- step mode
 
 GET  /actuator/prometheus               Prometheus scrape endpoint
 ```
@@ -99,9 +103,11 @@ both classes; see their Javadoc.
 
 > Recruiters skim repos in about 40 seconds. A GIF of your cache's internals animating in real time, at the top of the README, is worth more than any paragraph you could write.
 
-**Stack:** React 18 + Vite + TypeScript, Recharts for standard charts, hand-written SVG/Canvas for the custom visualizations, Tailwind for layout. Data arrives over **SSE** (`EventSource`) — one-way, dead simple, no WebSocket handshake complexity.
+**Stack, as planned:** React 18 + Vite + TypeScript, Recharts for standard charts, hand-written SVG/Canvas for the custom visualizations, Tailwind for layout. Data arrives over **SSE** (`EventSource`) — one-way, dead simple, no WebSocket handshake complexity.
 
-**Critical performance rule:** never stream one event per cache operation. At 14,000 RPS you would melt the browser. Aggregate server-side into a bounded ring buffer and emit **one snapshot frame at 10 Hz**, plus a small sample of individual events to drive the animations. State this in your report — it is a real engineering decision, not a detail.
+**Stack, as built** (`velox-dashboard`): React 19 (not 18 — the current release at build time) + Vite 8 + TypeScript + Recharts + Tailwind v4, plus one addition the plan did not call for: **framer-motion**, for the Internals screen's slide/reorder animations (`layout` + `AnimatePresence`) — simpler and more reliable than hand-rolled SVG/Canvas transform math for the same effect, and the only new frontend dependency this whole tier needed. Screens are tabs in one single-page app, not separate numbered pages. SSE and the 10 Hz tick are exactly as planned.
+
+**Critical performance rule:** never stream one event per cache operation. At 14,000 RPS you would melt the browser. Aggregate server-side into a bounded ring buffer and emit **one snapshot frame at 10 Hz**. As built, this is simpler than the plan's "snapshot plus a sample of individual events": every visualized structure (the Internals screen's three policies, the Policy Arena's eleven) is kept at a small, deliberately bounded size, so the *entire* current state fits in one frame -- there was no need for a second, separately-sampled event stream just to drive animations, since the frontend can derive "what moved" from consecutive full snapshots via React's keyed reconciliation.
 
 ### Screen 1 — Live Ops
 Ops/sec gauge; hit-ratio sparkline over the last 60s with an EWMA line; latency percentile bars (p50/p90/p99/p999); capacity fill bar in both entries and bytes; per-shard load distribution; evictions/sec; admission-reject rate.

@@ -31,6 +31,21 @@ class ArcPolicyTest {
     }
 
     @Test
+    @DisplayName("b1Keys/b2Keys agree with isRecencyGhost/isFrequencyGhost -- the same ghosts, enumerable not just testable")
+    void ghostKeyListsAgreeWithMembershipChecks() {
+        var policy = new ArcPolicy<String, Integer>(2);
+        var cache = new VeloxCache<String, Integer>(2, policy);
+
+        cache.put("A", 1);
+        cache.put("B", 2);
+        cache.put("C", 3); // capacity 2: evicts A into B1 (A was never promoted to T2)
+
+        assertEquals(java.util.List.of("A"), policy.b1Keys());
+        assertEquals(java.util.List.of(), policy.b2Keys());
+        assertEquals(policy.isRecencyGhost("A"), policy.b1Keys().contains("A"));
+    }
+
+    @Test
     @DisplayName("a scan of one-hit keys cannot evict an entry proven onto T2")
     void scanCannotEvictAProvenEntry() {
         // p starts at 0, so a resident T1 key is always preferred for eviction over a T2

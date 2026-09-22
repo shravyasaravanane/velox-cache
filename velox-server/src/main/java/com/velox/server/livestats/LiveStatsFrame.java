@@ -14,6 +14,9 @@ import java.util.List;
  * @param topKeys               {@link TopKTracker}'s current leaderboard, count descending
  * @param arenaStandings        {@link PolicyArena}'s current leaderboard, hit rate descending --
  *                               every listed policy racing against the identical request stream
+ * @param visualizer            {@link InternalsVisualizer}'s current snapshot: LRU/ARC/W-TinyLFU's
+ *                               internal structure at a small, legible capacity, for M6.3's
+ *                               animated Internals screen
  */
 public record LiveStatsFrame(
         long timestampMillis,
@@ -29,7 +32,8 @@ public record LiveStatsFrame(
         LatencyPercentilesMs latencyMs,
         long distinctKeysEstimate,
         List<TopKTracker.Entry> topKeys,
-        List<PolicyArena.Standing> arenaStandings) {
+        List<PolicyArena.Standing> arenaStandings,
+        InternalsVisualizer.Snapshot visualizer) {
 
     public record LatencyPercentilesMs(double p50, double p90, double p99, double p999) {
     }
