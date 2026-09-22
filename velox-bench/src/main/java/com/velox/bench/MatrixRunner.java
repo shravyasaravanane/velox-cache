@@ -2,7 +2,6 @@ package com.velox.bench;
 
 import com.velox.bench.workload.Workload;
 import com.velox.bench.workload.Workloads;
-import com.velox.core.VeloxCache;
 import com.velox.core.policy.BeladyOracle;
 import com.velox.core.policy.Policy;
 
@@ -87,9 +86,9 @@ public final class MatrixRunner {
                         rowsWritten++;
 
                         for (Policy policy : Policy.values()) {
-                            long[] result = simulate(trace, capacity, policy);
+                            var result = PolicySimulation.simulate(trace, capacity, policy);
                             writeRow(out, spec.label(), workload.name(), workload.keySpace(), capacity, seed,
-                                    policy.displayName(), result[0], result[1]);
+                                    policy.displayName(), result.hits(), result.misses());
                             rowsWritten++;
                         }
                         System.out.printf("%s capacity=%d seed=%d done (%d/%d rows)%n",
@@ -100,20 +99,6 @@ public final class MatrixRunner {
         }
 
         System.out.println("Wrote " + rowsWritten + " rows to " + outputPath.toAbsolutePath());
-    }
-
-    /** @return {hits, misses} from replaying {@code trace} as cache-aside against a fresh cache */
-    private static long[] simulate(int[] trace, int capacity, Policy policy) {
-        var cache = new VeloxCache<Integer, Integer>(capacity, policy.create(capacity));
-        long hits = 0;
-        for (int key : trace) {
-            if (cache.getIfPresent(key) != null) {
-                hits++;
-            } else {
-                cache.put(key, key);
-            }
-        }
-        return new long[] {hits, trace.length - hits};
     }
 
     private static List<Integer> boxed(int[] trace) {
