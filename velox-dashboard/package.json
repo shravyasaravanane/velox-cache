@@ -4,7 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "sync-benchmark-data": "node scripts/sync-benchmark-data.mjs",
+    "predev": "npm run sync-benchmark-data",
     "dev": "vite",
+    "prebuild": "npm run sync-benchmark-data",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview"
