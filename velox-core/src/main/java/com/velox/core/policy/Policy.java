@@ -72,7 +72,14 @@ public enum Policy {
      * does nothing, so promotion to Am requires surviving an eviction and being asked
      * for again, not merely a second touch in quick succession.
      */
-    TWO_Q("2Q", capacity -> new TwoQueuePolicy<>(capacity));
+    TWO_Q("2Q", capacity -> new TwoQueuePolicy<>(capacity)),
+
+    /**
+     * LRU-K with K=2: an entry is judged by recency only after its <b>second</b>
+     * reference, not its first. Until then it is more evictable than anything that has
+     * ever reached two references, however long ago. See {@link LruKPolicy}.
+     */
+    LRU_K("LRU-2", capacity -> new LruKPolicy<>(2));
 
     private final String displayName;
     private final IntFunction<EvictionPolicy<?, ?>> factory;

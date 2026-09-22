@@ -3,8 +3,10 @@ package com.velox.core.policy;
 import com.velox.core.VeloxCache;
 import com.velox.core.stats.CacheStats;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -402,6 +404,65 @@ final class PolicyTestSupport {
                 return main.get(main.size() - 1);
             }
             return a1in.get(a1in.size() - 1);
+        }
+    }
+
+    /**
+     * LRU-K by a linear scan: each key's last (up to) k reference ticks, and the victim
+     * found by comparing every tracked key's sort key directly. A single global counter
+     * hands out a distinct tick to every reference, so no two entries can ever tie --
+     * the real heap and this scan are guaranteed to agree on a unique minimum.
+     */
+    static final class NaiveLruK implements NaiveModel {
+        private final int k;
+        private final Map<String, Deque<Long>> history = new HashMap<>();
+        private long clock;
+
+        NaiveLruK(int k) {
+            this.k = k;
+        }
+
+        private void record(String key) {
+            Deque<Long> times = history.computeIfAbsent(key, unused -> new ArrayDeque<>());
+            times.addLast(++clock);
+            if (times.size() > k) {
+                times.removeFirst();
+            }
+        }
+
+        @Override
+        public void onInsert(String key) {
+            record(key);
+        }
+
+        @Override
+        public void onAccess(String key) {
+            record(key);
+        }
+
+        @Override
+        public void onMiss(String key) {
+        }
+
+        @Override
+        public void onRemove(String key) {
+            history.remove(key);
+        }
+
+        @Override
+        public String victim() {
+            String best = null;
+            long bestKey = Long.MAX_VALUE;
+            for (Map.Entry<String, Deque<Long>> entry : history.entrySet()) {
+                Deque<Long> times = entry.getValue();
+                long oldest = times.peekFirst();
+                long sortKey = times.size() == k ? oldest : oldest - Long.MAX_VALUE / 2;
+                if (sortKey < bestKey) {
+                    bestKey = sortKey;
+                    best = entry.getKey();
+                }
+            }
+            return best;
         }
     }
 
