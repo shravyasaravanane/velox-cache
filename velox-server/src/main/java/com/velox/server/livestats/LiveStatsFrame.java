@@ -11,7 +11,9 @@ import java.util.List;
  * @param distinctKeysEstimate {@link com.velox.core.sketch.HyperLogLog}'s running estimate of
  *                              how many distinct product ids have been requested, ever -- not a
  *                              per-tick number, since distinctness only grows
- * @param topKeys              {@link TopKTracker}'s current leaderboard, count descending
+ * @param topKeys               {@link TopKTracker}'s current leaderboard, count descending
+ * @param arenaStandings        {@link PolicyArena}'s current leaderboard, hit rate descending --
+ *                               every listed policy racing against the identical request stream
  */
 public record LiveStatsFrame(
         long timestampMillis,
@@ -26,7 +28,8 @@ public record LiveStatsFrame(
         int[] shardSizes,
         LatencyPercentilesMs latencyMs,
         long distinctKeysEstimate,
-        List<TopKTracker.Entry> topKeys) {
+        List<TopKTracker.Entry> topKeys,
+        List<PolicyArena.Standing> arenaStandings) {
 
     public record LatencyPercentilesMs(double p50, double p90, double p99, double p999) {
     }

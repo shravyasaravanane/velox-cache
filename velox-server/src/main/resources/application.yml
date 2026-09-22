@@ -38,9 +38,9 @@ management:
 # This application's own configuration -- see each consumer's Javadoc for why it exists:
 # DataSeeder (seed-products, seed-random-seed), CatalogQueryService (db-latency-ms),
 # CacheConfig (cache-capacity, cache-policy), CacheVariants (ab-policies),
-# ProductCacheService (double-delete-delay-ms) and LiveStatsConfig (hll-precision, top-k).
-# write-behind-flush-ms defaults to 2000 in WriteBehindBuffer itself, so it is only listed
-# here to be easy to find.
+# ProductCacheService (double-delete-delay-ms), LiveStatsConfig (hll-precision, top-k) and
+# PolicyArena (arena-capacity, arena-policies). write-behind-flush-ms defaults to 2000 in
+# WriteBehindBuffer itself, so it is only listed here to be easy to find.
 velox:
   demo:
     seed-products: 1000000
@@ -56,6 +56,10 @@ velox:
     # tracks -- both drive the dashboard's Hot Keys panel (M6.5).
     hll-precision: 14
     top-k: 10
+    # The Policy Arena (M6.4): every listed policy races the same live traffic in its own
+    # key-only shadow cache, independent of cache-capacity/cache-policy above.
+    arena-capacity: 1000
+    arena-policies: LRU,FIFO,RANDOM,CLOCK,LFU,LFU_AGED,SLRU,TWO_Q,LRU_K,ARC,W_TINY_LFU
 
 logging:
   level:

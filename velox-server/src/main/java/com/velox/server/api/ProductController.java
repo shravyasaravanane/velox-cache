@@ -6,6 +6,7 @@ import com.velox.server.cache.ProductCacheService;
 import com.velox.server.cache.ProductUpdate;
 import com.velox.server.domain.ProductDetails;
 import com.velox.server.livestats.LatencyRingBuffer;
+import com.velox.server.livestats.PolicyArena;
 import com.velox.server.livestats.TopKTracker;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,14 +30,17 @@ public class ProductController {
     private final LatencyRingBuffer latencyRingBuffer;
     private final HyperLogLog cardinalityEstimator;
     private final TopKTracker topKTracker;
+    private final PolicyArena policyArena;
 
     public ProductController(ProductCacheService productCacheService, CacheVariants cacheVariants,
-            LatencyRingBuffer latencyRingBuffer, HyperLogLog cardinalityEstimator, TopKTracker topKTracker) {
+            LatencyRingBuffer latencyRingBuffer, HyperLogLog cardinalityEstimator, TopKTracker topKTracker,
+            PolicyArena policyArena) {
         this.productCacheService = productCacheService;
         this.cacheVariants = cacheVariants;
         this.latencyRingBuffer = latencyRingBuffer;
         this.cardinalityEstimator = cardinalityEstimator;
         this.topKTracker = topKTracker;
+        this.policyArena = policyArena;
     }
 
     /**
@@ -49,9 +53,10 @@ public class ProductController {
      * latency afterward.
      *
      * <p>Only the default (primary-cache) path feeds {@link LatencyRingBuffer}, {@link
-     * HyperLogLog} and {@link TopKTracker}, which drive the live dashboard's latency percentile
-     * bars and hot-keys panel -- the dashboard watches the one cache the admin hot-swap
-     * endpoints actually control, not the disposable A/B comparison caches.
+     * HyperLogLog}, {@link TopKTracker} and {@link PolicyArena}, which drive the live
+     * dashboard's latency percentile bars, hot-keys panel and policy leaderboard -- the
+     * dashboard watches the one cache the admin hot-swap endpoints actually control, not the
+     * disposable A/B comparison caches.
      */
     @GetMapping("/api/products/{id}")
     public ResponseEntity<?> getProduct(@PathVariable long id,
@@ -66,6 +71,7 @@ public class ProductController {
                 latencyRingBuffer.record(System.nanoTime() - start);
                 cardinalityEstimator.add(id);
                 topKTracker.record(id);
+                policyArena.record(id);
             }
         }
         try {

@@ -39,17 +39,20 @@ public class LiveStatsBroadcaster {
     private final LatencyRingBuffer latencyRingBuffer;
     private final HyperLogLog cardinalityEstimator;
     private final TopKTracker topKTracker;
+    private final PolicyArena policyArena;
     private final List<SseEmitter> emitters = new CopyOnWriteArrayList<>();
 
     private CacheStats previousStats;
     private long previousTickNanos;
 
     public LiveStatsBroadcaster(HotSwappableCache<Long, ProductDetails> primaryCache,
-            LatencyRingBuffer latencyRingBuffer, HyperLogLog cardinalityEstimator, TopKTracker topKTracker) {
+            LatencyRingBuffer latencyRingBuffer, HyperLogLog cardinalityEstimator, TopKTracker topKTracker,
+            PolicyArena policyArena) {
         this.primaryCache = primaryCache;
         this.latencyRingBuffer = latencyRingBuffer;
         this.cardinalityEstimator = cardinalityEstimator;
         this.topKTracker = topKTracker;
+        this.policyArena = policyArena;
         this.previousStats = primaryCache.stats();
         this.previousTickNanos = System.nanoTime();
     }
@@ -95,7 +98,8 @@ public class LiveStatsBroadcaster {
                         latencyRingBuffer.percentileMillis(0.99),
                         latencyRingBuffer.percentileMillis(0.999)),
                 cardinalityEstimator.estimate(),
-                topKTracker.topK());
+                topKTracker.topK(),
+                policyArena.standings());
 
         for (SseEmitter emitter : emitters) {
             try {

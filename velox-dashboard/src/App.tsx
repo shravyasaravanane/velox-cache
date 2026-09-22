@@ -3,10 +3,12 @@ import { BenchmarkExplorerScreen } from './screens/BenchmarkExplorerScreen'
 import { ChaosScreen } from './screens/ChaosScreen'
 import { HotKeysScreen } from './screens/HotKeysScreen'
 import { LiveOpsScreen } from './screens/LiveOpsScreen'
+import { PolicyArenaScreen } from './screens/PolicyArenaScreen'
 import { BORDER, MUTED, PAGE_BG, TEAL, TEXT } from './theme'
 
 const SCREENS = [
   { id: 'live-ops', label: 'Live Ops', render: () => <LiveOpsScreen /> },
+  { id: 'arena', label: 'Policy Arena', render: () => <PolicyArenaScreen /> },
   { id: 'hot-keys', label: 'Hot Keys', render: () => <HotKeysScreen /> },
   { id: 'chaos', label: 'Chaos', render: () => <ChaosScreen /> },
   { id: 'benchmarks', label: 'Benchmarks', render: () => <BenchmarkExplorerScreen /> },

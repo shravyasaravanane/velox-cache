@@ -10,6 +10,14 @@ export interface TopKeyEntry {
   count: number
 }
 
+/** Mirrors com.velox.server.livestats.PolicyArena.Standing. */
+export interface ArenaStanding {
+  policy: string
+  hits: number
+  misses: number
+  hitRatePercent: number
+}
+
 /** Mirrors com.velox.server.livestats.LiveStatsFrame, field for field. */
 export interface LiveStatsFrame {
   timestampMillis: number
@@ -25,6 +33,7 @@ export interface LiveStatsFrame {
   latencyMs: LatencyPercentilesMs
   distinctKeysEstimate: number
   topKeys: TopKeyEntry[]
+  arenaStandings: ArenaStanding[]
 }
 
 /** Mirrors com.velox.server.api.ChaosController.Report -- the before/after CacheStats delta
